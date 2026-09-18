@@ -27,6 +27,25 @@ local function deviceBusy(device)
     return activeKnowledgeAction(device) ~= nil or activeMediaAction(device) ~= nil
 end
 
+-- Hotbar/attachment mods enqueue ordinary TimedActions for the real Radio
+-- item. If that exact CD player is currently recording/restoring, cancel the
+-- knowledge action first so the native equip/stow action can run immediately.
+-- serverStop owns the authoritative checkpoint; the next Play resumes it.
+if not SS._timedActionAddWrapped then
+    local vanillaTimedActionAdd = ISTimedActionQueue.add
+    ISTimedActionQueue.add = function(action)
+        local item = action and action.item or nil
+        local active = item and SS.isCDPlayer(item)
+            and activeKnowledgeAction(item) or nil
+        if active and active ~= action
+            and action.character == active.character then
+            active:forceStop()
+        end
+        return vanillaTimedActionAdd(action)
+    end
+    SS._timedActionAddWrapped = true
+end
+
 local function requestMediaAction(player, device, kind, disc)
     ISTimedActionQueue.add(SurvivorsSongMediaAction:new(player, device, kind, disc))
 end
