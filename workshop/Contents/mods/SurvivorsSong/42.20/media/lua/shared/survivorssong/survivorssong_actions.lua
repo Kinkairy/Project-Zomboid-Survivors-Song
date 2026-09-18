@@ -172,9 +172,12 @@ end
 local function loadPhysicalDisc(character, device, disc)
     if not SS.canLoadCustomCD(character, device, disc) then return false end
 
-    -- Capture the knowledge payload before consuming the physical disc.
+    -- Capture the knowledge payload and interruption checkpoint before
+    -- consuming the physical disc. The checkpoint belongs to the disc, not
+    -- to whichever CD player happens to hold it.
     local isSong = SS.isKnowledgeCD(disc)
     local source = disc:getModData()
+    local progressData = SS.snapshotKnowledgeProgress(disc)
     local songData = nil
     if isSong then
         songData = {
@@ -207,6 +210,7 @@ local function loadPhysicalDisc(character, device, disc)
     else
         SS.setBlankLoaded(device)
     end
+    SS.restoreKnowledgeProgress(device, progressData)
 
     syncDevice(device)
     return true
