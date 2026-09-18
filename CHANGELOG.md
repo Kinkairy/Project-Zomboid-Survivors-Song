@@ -4,9 +4,10 @@
 
 - Shorten active labels to `正在录入cd` and `正在听取cd`.
 - Save server-authoritative whole-page checkpoints when record/restore is interrupted.
+- Make the checkpoint follow the physical CD across eject/reinsert and across different CD players; the player only mirrors the checkpoint while the disc is loaded through the native carrier.
 - Resume from the saved checkpoint and run only the remaining duration on the next Play.
 - Clear stale client active-action state on forced cancellation.
-- Let same-device hotbar/equip/stow actions stop the knowledge action first so attached-device shortcuts remain usable.
+- Intercept the real Hotbar mouse/key/controller admission layer instead of the too-late TimedAction enqueue layer, so attached-device shortcuts remain usable.
 
 ## rc0.1 — 2026-09-18
 
