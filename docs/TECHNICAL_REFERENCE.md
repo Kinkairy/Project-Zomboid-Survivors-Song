@@ -1,4 +1,4 @@
-# Technical Reference — rc0.1
+# Technical Reference — rc0.2
 
 ## Scope
 
@@ -38,10 +38,10 @@ Normal music CDs remain vanilla-owned. Survivor's Song only adds an optional dur
 
 Manual Stop is terminal for an extended session. Listening effects are limited to boredom, unhappiness, stress, panic, and anger and require actually audible playback.
 
-## rc0.1 Known Limitations
+## rc0.2 Interruption and Shortcut Model
 
-- Record/restore interruption checkpoints are not persisted yet.
-- Starting a second record/restore after interruption does not resume from the previous fraction.
-- A mounted CD player can be handled by external hotbar/attachment mods, but rc0.1 does not coordinate those shortcut actions with an active Survivor's Song knowledge TimedAction.
+Record/restore uses a server-authoritative whole-page checkpoint stored on the CD-player item and bound to action kind plus actor identity. On interruption the server stores the completed page count and synchronizes the device. The next Play recomputes the current workload, clamps the saved page to the current page count, and runs only the remaining duration. Successful completion clears the checkpoint.
 
-These limitations are targeted for rc0.2.
+The client wraps `ISTimedActionQueue.add` narrowly for the same CD-player item. If an external hotbar/equip/stow TimedAction targets that device while a Survivor's Song knowledge action is active, the knowledge action is stopped first. The authoritative server stop saves the checkpoint; the original shortcut action then continues unchanged.
+
+This allows keyboard/mouse and controller paths that ultimately use the same hotbar TimedActions to work without modifying the attachment mod itself.
