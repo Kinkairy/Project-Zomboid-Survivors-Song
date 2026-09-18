@@ -129,7 +129,7 @@ end
 
 -- 1 = vanilla, 2 = 30, 3 = 60, 4 = 120 game minutes.
 function SS.getPlaybackDurationMinutes()
-    local option = math.floor(SS.getOptionNumber("PlaybackDuration", 3, 1, 4))
+    local option = math.floor(SS.getOptionNumber("PlaybackDuration", 1, 1, 4))
     if option == 1 then return 0 end
     if option == 2 then return 30 end
     if option == 4 then return 120 end
