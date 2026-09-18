@@ -1,13 +1,34 @@
 require "TimedActions/ISTimedActionQueue"
-require "Hotbar/ISHotbar"
 require "ISUI/ISInventoryPane"
 require "ISUI/ISInventoryPaneContextMenu"
+require "ISUI/ISToolTipInv"
 require "RadioCom/ISRadioAction"
 require "RadioCom/RadioWindowModules/RWMMedia"
 require "survivorssong/survivorssong_shared"
 require "survivorssong/survivorssong_actions"
 
 local SS = SurvivorsSong
+
+-- Match Personal Journal's tooltip strategy: supply localized recorded-time
+-- metadata only while vanilla ISToolTipInv renders this physical song CD.
+if not ISToolTipInv.SurvivorsSongTooltipInstalled then
+    local previousToolTipRender = ISToolTipInv.render
+
+    function ISToolTipInv:render(...)
+        local item = self.item
+        local songTooltip = item and SS.getSongTooltip(item) or nil
+        if not songTooltip then return previousToolTipRender(self, ...) end
+
+        local previousTooltip = item:getTooltip()
+        item:setTooltip(songTooltip)
+        local ok, result = pcall(previousToolTipRender, self, ...)
+        item:setTooltip(previousTooltip)
+        if not ok then error(result) end
+        return result
+    end
+
+    ISToolTipInv.SurvivorsSongTooltipInstalled = true
+end
 
 local function disableOption(option, textKey)
     option.notAvailable = true
@@ -16,8 +37,8 @@ local function disableOption(option, textKey)
     option.toolTip = tooltip
 end
 
-local function activeKnowledgeAction(device)
-    return device and SS._activeKnowledgeActions[device] or nil
+local function activeKnowledgeSession(device)
+    return device and SS.getKnowledgeSession(device) or nil
 end
 
 local function activeMediaAction(device)
@@ -25,106 +46,15 @@ local function activeMediaAction(device)
 end
 
 local function deviceBusy(device)
-    return activeKnowledgeAction(device) ~= nil or activeMediaAction(device) ~= nil
-end
-
-local function activeKnowledgeForHotbarSlot(hotbar, slotIndex)
-    local item = hotbar and hotbar.attachedItems
-        and hotbar.attachedItems[slotIndex] or nil
-    local active = item and SS.isCDPlayer(item)
-        and activeKnowledgeAction(item) or nil
-    if active and active.character == hotbar.chr then
-        return active, item
-    end
-    return nil, item
-end
-
-local function activeAttachedKnowledge(hotbar)
-    if not hotbar or not hotbar.attachedItems then return nil end
-    for _, item in pairs(hotbar.attachedItems) do
-        local active = item and SS.isCDPlayer(item)
-            and activeKnowledgeAction(item) or nil
-        if active and active.character == hotbar.chr then return active end
-    end
-    return nil
-end
-
-local function hotbarNonQueueGuardsPass(hotbar)
-    if not hotbar or isGamePaused() then return false end
-    local player = hotbar.chr or hotbar.character
-    if not player or player:isDead() or player:isAttacking() then return false end
-    local radial = getPlayerRadialMenu(hotbar.playerNum)
-    return not radial or not radial:isReallyVisible()
-end
-
--- Vanilla Hotbar rejects every shortcut while any TimedAction is queued.
--- Survivor's Song recording/restoring is intentionally long, so intercept only
--- the hotbar entry points needed to interrupt that exact knowledge action.
--- forceStop sends the normal native stop; authoritative serverStop saves the
--- current disc checkpoint before the queued equip/stow action can run.
-if not SS._hotbarInterruptWrapped then
-    local vanillaHotbarMouseUp = ISHotbar.onMouseUp
-    function ISHotbar:onMouseUp(x, y)
-        if not ISMouseDrag.dragging then
-            local slotIndex = self:getSlotIndexAt(x, y)
-            local active = slotIndex and slotIndex > -1
-                and activeKnowledgeForHotbarSlot(self, slotIndex) or nil
-            if active and hotbarNonQueueGuardsPass(self) then
-                active:forceStop()
-                self:activateSlot(slotIndex)
-                return
-            end
-        end
-        return vanillaHotbarMouseUp(self, x, y)
-    end
-
-    local vanillaHotbarKeyPressed = ISHotbar.onKeyPressed
-    ISHotbar.onKeyPressed = function(key)
-        local player = getSpecificPlayer(0)
-        local hotbar = getPlayerHotbar(0)
-        local slotIndex = hotbar and hotbar:getSlotForKey(key) or -1
-        local active = hotbar and slotIndex and slotIndex > -1
-            and activeKnowledgeForHotbarSlot(hotbar, slotIndex) or nil
-        local speed = UIManager.getSpeedControls()
-        local radial = getPlayerRadialMenu(0)
-        if active and player and not player:isDead()
-            and (not speed or speed:getCurrentGameSpeed() ~= 0)
-            and not JoypadState.players[1]
-            and not player:isAttacking()
-            and (not radial or not radial:isReallyVisible())
-            and not hotbar.radialWasVisible then
-            active:forceStop()
-            hotbar:activateSlot(slotIndex)
-            return
-        end
-        return vanillaHotbarKeyPressed(key)
-    end
-
-    -- Mercenary Loadout's D-pad radio slice deliberately delegates to this
-    -- vanilla guard before calling Hotbar:activateSlot(). Preserve every stock
-    -- guard except the non-empty action queue when the queued action is the
-    -- active Survivor's Song knowledge action on an attached CD player.
-    local vanillaHotbarAllowed = ISHotbar.isAllowedToActivateSlot
-    function ISHotbar:isAllowedToActivateSlot()
-        if vanillaHotbarAllowed(self) then return true end
-        local joypad = JoypadState.players[(self.playerNum or 0) + 1]
-        local active = joypad and activeAttachedKnowledge(self) or nil
-        if active and hotbarNonQueueGuardsPass(self) then
-            active:forceStop()
-            return true
-        end
-        return false
-    end
-
-    SS._hotbarInterruptWrapped = true
+    return activeKnowledgeSession(device) ~= nil or activeMediaAction(device) ~= nil
 end
 
 local function requestMediaAction(player, device, kind, disc)
     ISTimedActionQueue.add(SurvivorsSongMediaAction:new(player, device, kind, disc))
 end
 
-local function requestKnowledgeAction(player, device, kind)
-    ISTimedActionQueue.add(SurvivorsSongKnowledgeAction:new(player, device, kind))
+local function requestKnowledgeSession(player, device, kind)
+    return SS.requestKnowledgeSession(player, device, kind)
 end
 
 local function onFillInventoryObjectContextMenu(playerIndex, context, items)
@@ -181,13 +111,6 @@ function RWMMedia:removeMedia()
     if self.device and SS.isCDPlayer(self.device)
         and SS.getLoadedMode(self.device) ~= nil then
         if activeMediaAction(self.device) then return end
-
-        local active = activeKnowledgeAction(self.device)
-        if active then
-            active:forceStop()
-            return
-        end
-
         if self:doWalkTo() then
             requestMediaAction(self.player, self.device, "eject", nil)
         end
@@ -217,9 +140,9 @@ function RWMMedia:togglePlayMedia()
 
         local kind = getCustomKind(self.device)
         if kind then
-            local active = activeKnowledgeAction(self.device)
-            if active then
-                active:forceStop()
+            local session = activeKnowledgeSession(self.device)
+            if session then
+                SS.requestKnowledgeSessionStop(self.player, self.device)
                 return
             end
 
@@ -229,7 +152,7 @@ function RWMMedia:togglePlayMedia()
             if not allowed then return end
 
             if self:doWalkTo() then
-                requestKnowledgeAction(self.player, self.device, kind)
+                requestKnowledgeSession(self.player, self.device, kind)
             end
             return
         end
@@ -258,8 +181,8 @@ function RWMMedia:update()
 
     self.itemDropBox:setStoredItemFake(self.cdTex)
 
-    local active = activeKnowledgeAction(self.device)
-    if active then
+    local session = activeKnowledgeSession(self.device)
+    if session then
         self.toggleOnOffButton:setEnable(true)
         self.toggleOnOffButton:setTitle(self.textStop)
     else
@@ -268,8 +191,8 @@ function RWMMedia:update()
         self.toggleOnOffButton:setTitle(self.textPlay)
     end
 
-    if active then
-        local text = active.kind == "record"
+    if session then
+        local text = session.kind == "record"
             and getText("ContextMenu_SurvivorsSong_RecordingCD")
             or (SS.getLoadedSongName(self.device)
                 or getText("ContextMenu_SurvivorsSong_RestoringCD"))
@@ -291,7 +214,7 @@ function RWMMedia:getAPrompt()
 
         local mode = SS.getLoadedMode(self.device)
         if mode then
-            if activeKnowledgeAction(self.device) then return self.textStop end
+            if activeKnowledgeSession(self.device) then return self.textStop end
             local allowed = canStartCustom(self.player, self.device)
             return allowed and self.textPlay or nil
         end
