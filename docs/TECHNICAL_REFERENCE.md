@@ -40,8 +40,8 @@ Manual Stop is terminal for an extended session. Listening effects are limited t
 
 ## rc0.2 Interruption and Shortcut Model
 
-Record/restore uses a server-authoritative whole-page checkpoint stored on the CD-player item and bound to action kind plus actor identity. On interruption the server stores the completed page count and synchronizes the device. The next Play recomputes the current workload, clamps the saved page to the current page count, and runs only the remaining duration. Successful completion clears the checkpoint.
+The checkpoint is logically owned by the physical CD. Because the real disc is temporarily replaced by a native RecordedMedia carrier while loaded, its checkpoint is mirrored on the CD-player ModData only during insertion. Eject copies that checkpoint to the physical `Base.Disc_Retail`; loading the same disc into any CD player copies it back before duration planning. The checkpoint is bound to action kind and actor identity. On interruption the server stores completed whole pages; the next Play recomputes the current workload, clamps the saved page to the current page count, and runs only the remaining duration. Successful completion clears the checkpoint.
 
-The client wraps `ISTimedActionQueue.add` narrowly for the same CD-player item. If an external hotbar/equip/stow TimedAction targets that device while a Survivor's Song knowledge action is active, the knowledge action is stopped first. The authoritative server stop saves the checkpoint; the original shortcut action then continues unchanged.
+Hotbar compatibility does not wrap `ISTimedActionQueue.add`, because vanilla Hotbar rejects a non-empty action queue before equip/stow is ever enqueued. rc0.2 instead intercepts the Hotbar mouse/key/controller admission points. Only an active Survivor's Song knowledge action is interrupted; the authoritative server stop saves the checkpoint, then the original shortcut path continues unchanged.
 
 This allows keyboard/mouse and controller paths that ultimately use the same hotbar TimedActions to work without modifying the attachment mod itself.
