@@ -1,0 +1,46 @@
+VERSION = 1,
+
+option SurvivorsSong.PlaybackDuration = {
+    type = enum,
+    numValues = 4,
+    default = 3,
+    page = SurvivorsSong,
+    translation = SurvivorsSong_PlaybackDuration,
+    valueTranslation = SurvivorsSong_PlaybackDuration_Values,
+}
+
+option SurvivorsSong.ReduceBoredom = {
+    type = boolean, default = true, page = SurvivorsSong, translation = SurvivorsSong_ReduceBoredom,
+}
+
+option SurvivorsSong.ReduceUnhappiness = {
+    type = boolean, default = true, page = SurvivorsSong, translation = SurvivorsSong_ReduceUnhappiness,
+}
+
+option SurvivorsSong.ReduceStress = {
+    type = boolean, default = true, page = SurvivorsSong, translation = SurvivorsSong_ReduceStress,
+}
+
+option SurvivorsSong.ReducePanic = {
+    type = boolean, default = false, page = SurvivorsSong, translation = SurvivorsSong_ReducePanic,
+}
+
+option SurvivorsSong.ReduceAnger = {
+    type = boolean, default = false, page = SurvivorsSong, translation = SurvivorsSong_ReduceAnger,
+}
+
+option SurvivorsSong.SkillXP = {
+    type = boolean, default = true, page = SurvivorsSong, translation = SurvivorsSong_SkillXP,
+}
+
+option SurvivorsSong.RecordTimeMultiplier = {
+    type = double, min = 0.1, max = 10.0, default = 1.0, page = SurvivorsSong, translation = SurvivorsSong_RecordTimeMultiplier,
+}
+
+option SurvivorsSong.RestoreTimeMultiplier = {
+    type = double, min = 0.1, max = 10.0, default = 1.0, page = SurvivorsSong, translation = SurvivorsSong_RestoreTimeMultiplier,
+}
+
+option SurvivorsSong.RecoveryPercent = {
+    type = integer, min = 50, max = 100, default = 100, page = SurvivorsSong, translation = SurvivorsSong_RecoveryPercent,
+}
