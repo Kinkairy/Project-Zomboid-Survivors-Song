@@ -420,7 +420,14 @@ local function scanPlayer(player)
 
     local inventory = player:getInventory()
     if not inventory then return end
-    local items = inventory:getItems()
+
+    -- CD players may be inside backpacks/pouches while a mounting mod keeps
+    -- them usable. Scan the complete player inventory tree so playback
+    -- deadlines continue to be enforced after the device leaves the root
+    -- inventory level.
+    local items = inventory:getAllEvalRecurse(function(item)
+        return SS.isCDPlayer(item)
+    end)
     for index = 0, items:size() - 1 do
         updateDevice(player, items:get(index))
     end
