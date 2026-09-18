@@ -1,8 +1,1 @@
-{
-    "ContextMenu_SurvivorsSong_EraseCD": "擦除 CD",
-    "ContextMenu_SurvivorsSong_ErasingCD": "正在擦除 CD",
-    "ContextMenu_SurvivorsSong_RecordingCD": "正在將技能錄入 CD",
-    "ContextMenu_SurvivorsSong_RestoringCD": "正在從 CD 恢復技能",
-    "ContextMenu_SurvivorsSong_NeedPower": "CD 機需要電力。",
-    "ContextMenu_SurvivorsSong_DeviceBusy": "請先停止目前的 CD 操作。"
-}
+{"ContextMenu_SurvivorsSong_EraseCD":"擦除 CD","ContextMenu_SurvivorsSong_ErasingCD":"正在擦除 CD","ContextMenu_SurvivorsSong_RecordingCD":"正在錄入cd","ContextMenu_SurvivorsSong_RestoringCD":"正在聽取cd","ContextMenu_SurvivorsSong_NeedPower":"CD 機需要電力。","ContextMenu_SurvivorsSong_DeviceBusy":"請先停止目前的 CD 操作。"}
