@@ -3,7 +3,7 @@ SurvivorsSong = SurvivorsSong or {}
 local SS = SurvivorsSong
 
 SS.VERSION = 2
-SS.BUILD = "rc0.2"
+SS.BUILD = "rc0.4"
 SS.MODULE = "SurvivorsSong"
 
 SS.RETAIL_CD_TYPE = "Base.Disc_Retail"
@@ -12,6 +12,7 @@ SS.RETAIL_CD_TYPE = "Base.Disc_Retail"
 SS.BLANK_CD_TYPE = SS.RETAIL_CD_TYPE
 SS.CD_PLAYER_TYPE = "Base.CDplayer"
 SS.MICROPHONE_TYPE = "Base.Microphone"
+SS.RECORDED_AT_TEXT_KEY = "IGUI_SurvivorsSong_RecordedAt"
 
 SS.MODE_BLANK = "blank"
 SS.MODE_SONG = "song"
@@ -191,6 +192,19 @@ function SS.isDeviceTurnedOn(device)
     if not data then return false end
     local ok, value = pcall(function() return data:getIsTurnedOn() end)
     return ok and value == true
+end
+
+function SS.isKnowledgeDeviceActiveForPlayer(player, device)
+    if not player or not device then return false end
+    if SS.findDeviceById(player, safeItemId(device)) ~= device then return false end
+    if player:getPrimaryHandItem() == device or player:getSecondaryHandItem() == device then
+        return true
+    end
+    local okAttached, attached = pcall(function() return player:isAttachedItem(device) end)
+    if okAttached and attached == true then return true end
+    local okSlot, slot = pcall(function() return device:getAttachedSlot() end)
+    return okSlot and tonumber(slot) ~= nil and tonumber(slot) >= 0
+        and device:getContainer() == player:getInventory()
 end
 
 -- Blank/song CDs occupy the native DeviceData media slot with a temporary
@@ -381,16 +395,19 @@ function SS.getRemainingActionTime(totalTime, startPage, totalPages)
         * ((totalPages - startPage) / totalPages)))
 end
 
-local function gameDateStamp()
-    local time = getGameTime and getGameTime() or nil
-    if not time then return "" end
-    local tod = tonumber(time:getTimeOfDay()) or 0
-    local totalMinutes = math.floor(tod * 60 + 0.0001) % 1440
+function SS.getGameDateTimeStamp()
+    -- Same timestamp format as Personal Journal 1.3.2.
+    local gameTime = getGameTime and getGameTime() or nil
+    if not gameTime then return nil end
+    local timeOfDay = tonumber(gameTime:getTimeOfDay()) or 0
+    local totalMinutes = math.floor((timeOfDay * 60) + 0.0001) % 1440
+    local hour = math.floor(totalMinutes / 60)
+    local minute = totalMinutes % 60
     return string.format("%04d/%02d/%02d %02d:%02d",
-        tonumber(time:getYear()) or 0,
-        (tonumber(time:getMonth()) or 0) + 1,
-        (tonumber(time:getDay()) or 0) + 1,
-        math.floor(totalMinutes / 60), totalMinutes % 60)
+        tonumber(gameTime:getYear()) or 0,
+        (tonumber(gameTime:getMonth()) or 0) + 1,
+        (tonumber(gameTime:getDay()) or 0) + 1,
+        hour, minute)
 end
 
 function SS.getSongName(authorName)
@@ -417,6 +434,13 @@ end
 function SS.getSavedSkills(item)
     if not SS.isKnowledgeCD(item) then return {} end
     return SS.decodeSkills(item:getModData().SS_skills)
+end
+
+function SS.getSongTooltip(item)
+    if not SS.isKnowledgeCD(item) then return nil end
+    local recordedAt = tostring(item:getModData().SS_recordedAt or "")
+    if recordedAt == "" then return nil end
+    return getText(SS.RECORDED_AT_TEXT_KEY, recordedAt)
 end
 
 function SS.canUseKnowledgeRecord(player, itemOrDevice)
@@ -624,14 +648,15 @@ function SS.writeSongToLoadedDevice(player, device)
     md.SS_loadedSkills = SS.encodeSkills(delta.snapshot)
     md.SS_loadedAuthorName = characterName(player)
     md.SS_loadedAuthorUser = username(player)
-    md.SS_loadedRecordedAt = gameDateStamp()
+    local recordedAt = SS.getGameDateTimeStamp()
+    if recordedAt then md.SS_loadedRecordedAt = recordedAt end
     return true
 end
 
 local function canRecordContext(player, device)
     if not SS.isSkillXpEnabled() then return false end
     if not player or player:isDead() or not SS.isCDPlayer(device) then return false end
-    if SS.findDeviceById(player, safeItemId(device)) ~= device then return false end
+    if not SS.isKnowledgeDeviceActiveForPlayer(player, device) then return false end
     local data = SS.getDeviceData(device)
     if not data or not data:hasMedia() or tonumber(data:getMediaType()) ~= 0 then return false end
     if SS.getLoadedMode(device) ~= SS.MODE_BLANK then return false end
@@ -642,7 +667,7 @@ end
 local function canRestoreContext(player, device)
     if not SS.isSkillXpEnabled() then return false end
     if not player or player:isDead() or not SS.isCDPlayer(device) then return false end
-    if SS.findDeviceById(player, safeItemId(device)) ~= device then return false end
+    if not SS.isKnowledgeDeviceActiveForPlayer(player, device) then return false end
     local data = SS.getDeviceData(device)
     if not data or not data:hasMedia() or tonumber(data:getMediaType()) ~= 0 then return false end
     if SS.getLoadedMode(device) ~= SS.MODE_SONG then return false end
@@ -853,6 +878,34 @@ local function resolveCharacterStat(name)
     return CharacterStat[name]
 end
 
+local EFFECT_HALO_SUFFIX = {
+    BOREDOM = "Boredom",
+    UNHAPPINESS = "Unhappiness",
+    STRESS = "Stress",
+    PANIC = "Panic",
+    ANGER = "Anger",
+}
+
+local function showListeningEffectHalo(player, statName)
+    if isServer() or not player or not player:isLocalPlayer()
+        or not HaloTextHelper then
+        return
+    end
+    local suffix = EFFECT_HALO_SUFFIX[statName]
+    if not suffix then return end
+    local key = "IGUI_HaloNote_" .. suffix
+    local label = getText(key)
+    if not label or tostring(label) == key then
+        local fallbackKey = "IGUI_StatsAndBody_" .. suffix
+        label = getText(fallbackKey)
+        if not label or tostring(label) == fallbackKey then
+            label = suffix
+        end
+    end
+    HaloTextHelper.addTextWithArrow(player, label, "[br/]", false,
+        HaloTextHelper.getGoodColor())
+end
+
 function SS.applyListeningEffect(player, deviceData)
     if not player or player:isDead() or not deviceData or not deviceData:hasMedia() then return false end
     local stats = player:getStats()
@@ -869,8 +922,13 @@ function SS.applyListeningEffect(player, deviceData)
                 local maximum = tonumber(stat:getMaximumValue()) or 1
                 local amount = math.abs(tonumber(fraction)) * math.max(0, maximum - minimum)
                 if amount > 0 then
+                    local before = tonumber(stats:get(stat))
                     stats:remove(stat, amount)
-                    changed = true
+                    local after = tonumber(stats:get(stat))
+                    if before and after and after < before then
+                        changed = true
+                        showListeningEffectHalo(player, statName)
+                    end
                 end
             end
         end
