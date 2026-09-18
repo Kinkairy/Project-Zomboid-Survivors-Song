@@ -1,0 +1,8 @@
+{
+    "ContextMenu_SurvivorsSong_EraseCD": "擦除 CD",
+    "ContextMenu_SurvivorsSong_ErasingCD": "正在擦除 CD",
+    "ContextMenu_SurvivorsSong_RecordingCD": "正在将技能录入 CD",
+    "ContextMenu_SurvivorsSong_RestoringCD": "正在从 CD 恢复技能",
+    "ContextMenu_SurvivorsSong_NeedPower": "CD 机需要电力。",
+    "ContextMenu_SurvivorsSong_DeviceBusy": "请先停止当前 CD 操作。"
+}
