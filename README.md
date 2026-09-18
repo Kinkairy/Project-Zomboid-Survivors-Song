@@ -8,7 +8,7 @@ Survivor's Song 是面向 Project Zomboid Build 42.20 的 CD 技能记录 Mod。
 
 它复用原版 CD 播放器和原版 `Base.Disc_Retail`，不新增实体 CD 类型。普通音乐 CD 可以在 CD 机内擦除为空白盘；空白盘可记录角色技能 XP，之后由允许的角色通过同一台原版 CD 播放器恢复缺失 XP。
 
-- 当前版本：`rc0.1`
+- 当前版本：`rc0.2`
 - Mod ID：`SurvivorsSong`
 - 目标版本：Project Zomboid Build 42.20
 - 支持语言：简体中文、繁体中文、English
@@ -48,7 +48,7 @@ Survivor's Song is a CD-based skill-recording mod for Project Zomboid Build 42.2
 
 It reuses the vanilla CD player and vanilla `Base.Disc_Retail` item. A normal music CD can be erased in the player, reused as a blank disc to record character skill XP, and later played through the same vanilla device to restore missing XP for an allowed character.
 
-- Current version: `rc0.1`
+- Current version: `rc0.2`
 - Mod ID: `SurvivorsSong`
 - Target: Project Zomboid Build 42.20
 - Languages: Simplified Chinese, Traditional Chinese, English
@@ -62,6 +62,8 @@ It reuses the vanilla CD player and vanilla `Base.Disc_Retail` item. A normal mu
 - Recording requires a blank disc, powered/on CD player, installed headphones/earbuds, and a vanilla microphone carried by the character.
 - Restore requires a recorded song, powered/on CD player, and installed headphones/earbuds; no microphone is required.
 - Multiplayer completion is server authoritative.
+- Interrupted recording/restoring saves a server-authoritative whole-page checkpoint; pressing Play again resumes only the remaining duration.
+- If a hotbar/equip/stow action targets the same CD player during recording/restoring, the knowledge action stops first, saves its checkpoint, and lets the normal shortcut continue.
 - Normal music playback can use vanilla duration or extend to 30, 60, or 120 game minutes.
 - Enhanced listening effects are limited to boredom, unhappiness, stress, panic, and anger.
 
