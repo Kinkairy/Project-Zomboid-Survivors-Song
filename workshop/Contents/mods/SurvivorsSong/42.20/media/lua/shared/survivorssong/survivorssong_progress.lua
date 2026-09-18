@@ -1,170 +1,472 @@
--- Survivor's Song R2.2: server-authoritative knowledge-action progress view.
--- Adapted from Personal Journal 1.3.2. This is presentation telemetry only:
--- it cannot award XP, complete the action, or supply a client-authored workload.
+-- Survivor's Song rc0.4: server-authoritative background knowledge sessions.
+-- Recording/restoring no longer occupies the character TimedAction queue.
+-- Timing still advances in the same units as BaseAction: GameTime multiplier
+-- per tick. The physical CD owns interruption checkpoints; while loaded, the
+-- device mirrors that checkpoint because the player-visible disc is replaced
+-- by the native RecordedMedia carrier.
 require "survivorssong/survivorssong_shared"
+
 local SS = SurvivorsSong
-SS.PROGRESS_VIEW_SCALE = 1000000
-local POLL_MS, STALE_MS = 500, 3000
-local views = setmetatable({}, { __mode = "k" })
-SS._progressKeyCounter = SS._progressKeyCounter or 0
+local STATE_PUSH_MS = 500
 
-local function now() return getTimestampMs() end
-local function finite(n)
-    return type(n) == "number" and n == n and n ~= math.huge and n ~= -math.huge
-end
-local function integer(n) return finite(n) and n == math.floor(n) end
+SS._knowledgeSessions = SS._knowledgeSessions or {}
+SS._knowledgeSessionByPlayer = SS._knowledgeSessionByPlayer or setmetatable({}, { __mode = "k" })
+SS._clientKnowledgeSessions = SS._clientKnowledgeSessions or {}
+SS._clientKnowledgePending = SS._clientKnowledgePending or {}
+SS._clientKnowledgeSessionByPlayer = SS._clientKnowledgeSessionByPlayer
+    or setmetatable({}, { __mode = "k" })
 
-function SS.isProgressKey(key)
-    return type(key) == "string" and #key > 0 and #key <= 96
+local function nowMs()
+    return getTimestampMs()
 end
 
-function SS.newProgressKey()
-    SS._progressKeyCounter = SS._progressKeyCounter + 1
-    return tostring(now()) .. ":" .. tostring(SS._progressKeyCounter)
+local function clamp01(value)
+    return math.max(0, math.min(1, tonumber(value) or 0))
 end
 
-function SS.beginProgressView(action, label)
-    if not isClient() then return end
-    views[action.character] = action
-    local initial = 0
-    if action.plan and action.plan.pages and action.plan.pages > 0 then
-        initial = action.plan.startPage / action.plan.pages
+local function authoritative()
+    return isServer() or not isClient()
+end
+
+local function deviceId(device)
+    if not device then return nil end
+    local ok, id = pcall(function() return device:getID() end)
+    if not ok then return nil end
+    return tonumber(id)
+end
+
+local function labelFor(kind)
+    return getText(kind == "record"
+        and "ContextMenu_SurvivorsSong_RecordingCD"
+        or "ContextMenu_SurvivorsSong_RestoringCD")
+end
+
+local function markItem(device, kind, progress)
+    if not device then return end
+    device:setJobType(labelFor(kind))
+    device:setJobDelta(clamp01(progress))
+    local container = device:getContainer()
+    if container then container:setDrawDirty(true) end
+end
+
+local function clearItem(device)
+    if not device then return end
+    device:setJobDelta(0)
+    device:setJobType("")
+    local container = device:getContainer()
+    if container then container:setDrawDirty(true) end
+end
+
+local function hasForegroundTimedAction(player)
+    if not player or not ISTimedActionQueue
+        or not ISTimedActionQueue.isPlayerDoingAction then
+        return false
     end
-    action.progressView = { value = initial, sequence = 0, phase = "waiting",
-        label = label, nextPoll = 0, receivedAt = nil }
-    action.action:setTime(SS.PROGRESS_VIEW_SCALE)
-    action:setJobDelta(initial)
-    action.item:setJobDelta(initial)
+    return ISTimedActionQueue.isPlayerDoingAction(player) == true
 end
 
-function SS.endProgressView(action)
-    if action and views[action.character] == action then views[action.character] = nil end
-    if action then action.progressView = nil end
-end
-
-local function setLabel(action, key)
-    local v = action.progressView
-    local label = key and getText(key, v.label) or v.label
-    if v.displayLabel ~= label then
-        v.displayLabel = label
-        action.item:setJobType(label)
-        local container = action.item:getContainer()
-        if container then container:setDrawDirty(true) end
+local function setOverheadProgress(player, value)
+    if isServer() or not player or not player:isLocalPlayer()
+        or hasForegroundTimedAction(player) then
+        return
     end
-end
-
-local function draw(action)
-    local v = action.progressView
-    local progress = v.value
-    -- BaseAction may locally advance before Lua update. Pin both visible bars
-    -- back to the last real server sample on every client frame.
-    action:setJobDelta(progress)
-    action.item:setJobDelta(progress)
-    UIManager.getProgressBar(action.character:getPlayerNum()):setValue(progress)
-
-    local age = now() - (v.receivedAt or 0)
-    if v.phase == "complete" then
-        setLabel(action, "IGUI_SurvivorsSong_WaitActionDone")
-    elseif v.phase == "applying" then
-        setLabel(action, "IGUI_SurvivorsSong_Applying")
-    elseif not v.receivedAt or age > STALE_MS or age < 0 then
-        setLabel(action, "IGUI_SurvivorsSong_WaitServer")
-    elseif progress >= 1 then
-        setLabel(action, "IGUI_SurvivorsSong_WaitActionDone")
-    else
-        setLabel(action, nil)
-    end
-end
-
-function SS.updateProgressView(action)
-    local v = action.progressView
-    if not v or views[action.character] ~= action then return end
-    local t = now()
-    if t >= v.nextPoll or t < v.nextPoll - POLL_MS then
-        v.nextPoll = t + POLL_MS
-        local ok, err = pcall(sendClientCommand, action.character, SS.MODULE, "progress", {
-            itemId = action.item:getID(), kind = action.kind,
-            progressKey = action.progressKey,
-        })
-        if not ok and not v.warningLogged then
-            v.warningLogged = true
-            print("[SurvivorsSong] progress request failed: " .. tostring(err))
-        end
-    end
-    draw(action)
-end
-
-function SS.publishActionProgress(action, phase)
-    if not isServer() or not action or not SS.isProgressKey(action.progressKey) then return end
-    local ok, err = pcall(function()
-        local value = phase == "complete" and 1 or action.netAction:getProgress()
-        if not finite(value) then return end
-        if phase ~= "complete" and action.plan and action.plan.pages
-            and action.plan.pages > 0 then
-            value = (action.plan.startPage
-                + (action.plan.pages - action.plan.startPage) * value)
-                / action.plan.pages
-        end
-        action.progressSequence = (action.progressSequence or 0) + 1
-        sendServerCommand(action.character, SS.MODULE, "progress", {
-            onlineID = action.character:getOnlineID(),
-            recipientKey = action.recipientKey,
-            itemId = action.item:getID(),
-            kind = action.kind,
-            progressKey = action.progressKey,
-            sequence = action.progressSequence,
-            phase = phase,
-            progress = math.max(0, math.min(1, value)),
-        })
+    local ok, bar = pcall(function()
+        return UIManager.getProgressBar(player:getPlayerNum())
     end)
-    if not ok and not action.progressWarningLogged then
-        action.progressWarningLogged = true
-        print("[SurvivorsSong] progress view send failed: " .. tostring(err))
+    if ok and bar then bar:setValue(clamp01(value)) end
+end
+
+local function clearOverheadProgress(player)
+    if isServer() or not player or not player:isLocalPlayer()
+        or hasForegroundTimedAction(player) then
+        return
+    end
+    local ok, bar = pcall(function()
+        return UIManager.getProgressBar(player:getPlayerNum())
+    end)
+    if ok and bar then bar:setValue(0) end
+end
+
+local function sessionProgress(session)
+    if not session then return 0 end
+    if session.duration <= 0 then return 1 end
+    local localProgress = clamp01(session.elapsed / session.duration)
+    return clamp01((session.startPage
+        + (session.pages - session.startPage) * localProgress)
+        / session.pages)
+end
+
+local function sessionPage(session)
+    if not session then return 0 end
+    local progress = session.duration > 0
+        and clamp01(session.elapsed / session.duration) or 1
+    return math.max(session.startPage, math.min(session.pages,
+        session.startPage
+            + math.floor((session.pages - session.startPage)
+                * progress + 0.000001)))
+end
+
+local function syncDevice(device)
+    if device and isServer() then device:syncItemFields() end
+end
+
+local function pushState(session, phase, force)
+    if not session then return end
+    local t = nowMs()
+    if not force and session.lastPushMs
+        and t >= session.lastPushMs
+        and t - session.lastPushMs < STATE_PUSH_MS then
+        return
+    end
+    session.lastPushMs = t
+    local progress = sessionProgress(session)
+    if isServer() then
+        sendServerCommand(session.player, SS.MODULE, "knowledgeState", {
+            onlineID = session.player:getOnlineID(),
+            itemId = session.itemId,
+            kind = session.kind,
+            phase = phase or session.phase,
+            progress = progress,
+        })
+    elseif not isClient() then
+        markItem(session.device, session.kind, progress)
+        setOverheadProgress(session.player, progress)
     end
 end
 
-local function receiveRequest(module, command, player, args)
-    if not isServer() or module ~= SS.MODULE or command ~= "progress"
-        or not player or type(args) ~= "table" then return end
-    local item = SS.findDeviceById(player, args.itemId)
-    local action = item and SS._activeKnowledgeActions[item] or nil
-    if not action or action.character ~= player or action.rejected
-        or args.progressKey ~= action.progressKey or args.kind ~= action.kind
-        or tonumber(args.itemId) ~= action.item:getID() then return end
-
-    local t = now()
-    if action.lastProgressReply and t >= action.lastProgressReply
-        and t - action.lastProgressReply < POLL_MS then return end
-    action.lastProgressReply = t
-    SS.publishActionProgress(action, "running")
+local function saveCheckpoint(session)
+    if not session or not session.device then return end
+    local page = sessionPage(session)
+    if page <= session.lastPage then return end
+    session.lastPage = page
+    SS.saveKnowledgeProgress(session.device, session.kind,
+        session.actor, page, session.pages)
+    syncDevice(session.device)
 end
 
-local phaseRank = { running = 1, applying = 2, complete = 3,
-    rejected = 3, cancelled = 3 }
-
-local function receiveReply(module, command, args)
-    if not isClient() or module ~= SS.MODULE or command ~= "progress"
-        or type(args) ~= "table" or not integer(args.onlineID) or args.onlineID < 0 then return end
-    local player = getPlayerByOnlineID(args.onlineID)
-    local action = player and views[player]
-    local v = action and action.progressView
-    if not v or not player:isLocalPlayer() or player:isDead()
-        or args.recipientKey ~= SS.getActionActorKey(player)
-        or args.progressKey ~= action.progressKey or args.kind ~= action.kind
-        or tonumber(args.itemId) ~= action.item:getID()
-        or SS.findDeviceById(player, args.itemId) ~= action.item
-        or not integer(args.sequence) or args.sequence <= v.sequence
-        or not phaseRank[args.phase] or not finite(args.progress)
-        or args.progress < 0 or args.progress > 1 then return end
-    if (phaseRank[v.phase] or 0) > phaseRank[args.phase] then return end
-    if args.progress < v.value then return end
-
-    v.sequence, v.receivedAt, v.phase = args.sequence, now(), args.phase
-    v.value = args.progress
-    if args.phase == "rejected" or args.phase == "cancelled" then
-        action.rejected = true
+local function removeSession(session)
+    if not session then return end
+    if SS._knowledgeSessions[session.device] == session then
+        SS._knowledgeSessions[session.device] = nil
+    end
+    if SS._knowledgeSessionByPlayer[session.player] == session then
+        SS._knowledgeSessionByPlayer[session.player] = nil
     end
 end
 
-Events.OnClientCommand.Add(receiveRequest)
-Events.OnServerCommand.Add(receiveReply)
+local function finishSession(session, phase, keepCheckpoint)
+    if not session then return end
+    if keepCheckpoint then saveCheckpoint(session) end
+    removeSession(session)
+    pushState(session, phase, true)
+    if not isServer() then
+        clearItem(session.device)
+        clearOverheadProgress(session.player)
+    end
+end
+
+function SS.getKnowledgeSession(device)
+    local id = deviceId(device)
+    if not id then return nil end
+    if isClient() then
+        return SS._clientKnowledgeSessions[id]
+            or SS._clientKnowledgePending[id]
+    end
+    return SS._knowledgeSessions[device]
+end
+
+function SS.hasKnowledgeSession(device)
+    return SS.getKnowledgeSession(device) ~= nil
+end
+
+function SS.startKnowledgeSession(player, device, kind)
+    if not authoritative() or not player or not device
+        or (kind ~= "record" and kind ~= "restore") then
+        return false
+    end
+    if SS._activeMediaActions and SS._activeMediaActions[device] then return false end
+
+    local existing = SS._knowledgeSessions[device]
+    if existing then return existing.player == player and existing.kind == kind end
+    if SS._knowledgeSessionByPlayer[player] then return false end
+    if not SS.isKnowledgeActionValid(player, device, kind) then return false end
+
+    local delta = kind == "restore"
+        and SS.getRestoreDelta(player, device)
+        or SS.getRecordDelta(player, device)
+    local pages = SS.getActionPageCount(kind, delta)
+    local actor = SS.getActionActorKey(player)
+    local startPage = SS.getSavedKnowledgePage(device, kind, actor, pages)
+    local totalTime = SS.getActionTime(kind, player, device, delta)
+    local duration = SS.getRemainingActionTime(totalTime, startPage, pages)
+
+    local session = {
+        player = player,
+        device = device,
+        itemId = deviceId(device),
+        kind = kind,
+        actor = actor,
+        pages = pages,
+        startPage = startPage,
+        lastPage = startPage,
+        duration = duration,
+        elapsed = 0,
+        phase = "running",
+        lastPushMs = nil,
+    }
+    SS._knowledgeSessions[device] = session
+    SS._knowledgeSessionByPlayer[player] = session
+
+    local data = SS.getDeviceData(device)
+    if data and data:isPlayingMedia() then data:StopPlayMedia() end
+    pushState(session, "running", true)
+    return true
+end
+
+function SS.stopKnowledgeSession(player, device, reason)
+    if not authoritative() or not device then return false end
+    local session = SS._knowledgeSessions[device]
+    if not session or (player and session.player ~= player) then return false end
+    saveCheckpoint(session)
+    finishSession(session, reason or "stopped", false)
+    return true
+end
+
+function SS.stopKnowledgeSessionForDevice(device, reason)
+    if not authoritative() or not device then return false end
+    local session = SS._knowledgeSessions[device]
+    if not session then return false end
+    saveCheckpoint(session)
+    finishSession(session, reason or "stopped", false)
+    return true
+end
+
+function SS.requestKnowledgeSession(player, device, kind)
+    if not player or not device then return false end
+    local id = deviceId(device)
+    if not id then return false end
+
+    if isClient() then
+        if SS._clientKnowledgeSessions[id] or SS._clientKnowledgePending[id] then
+            return false
+        end
+        local delta = kind == "restore"
+            and SS.getRestoreDelta(player, device)
+            or SS.getRecordDelta(player, device)
+        local pages = SS.getActionPageCount(kind, delta)
+        local savedPage = SS.getSavedKnowledgePage(device, kind,
+            SS.getActionActorKey(player), pages)
+        SS._clientKnowledgePending[id] = {
+            itemId = id,
+            kind = kind,
+            phase = "waiting",
+            progress = pages > 0 and savedPage / pages or 0,
+        }
+        sendClientCommand(player, SS.MODULE, "knowledgeStart", {
+            itemId = id,
+            kind = kind,
+        })
+        return true
+    end
+
+    return SS.startKnowledgeSession(player, device, kind)
+end
+
+function SS.requestKnowledgeSessionStop(player, device)
+    if not player or not device then return false end
+    local id = deviceId(device)
+    if not id then return false end
+    if isClient() then
+        local state = SS._clientKnowledgeSessions[id]
+            or SS._clientKnowledgePending[id]
+        sendClientCommand(player, SS.MODULE, "knowledgeStop", {
+            itemId = id,
+            kind = state and state.kind or "",
+        })
+        return true
+    end
+    return SS.stopKnowledgeSession(player, device, "stopped")
+end
+
+local function completeSession(session)
+    local ok, applied = pcall(function()
+        if session.kind == "record" then
+            return SS.commitRecord(session.player, session.device)
+        end
+        return SS.applyRestore(session.player, session.device)
+    end)
+
+    if ok and applied then
+        SS.clearKnowledgeProgress(session.device)
+        syncDevice(session.device)
+        session.elapsed = session.duration
+        finishSession(session, "complete", false)
+        return
+    end
+
+    -- A restore can become unnecessary while it runs if another mechanic
+    -- grants the missing XP. Treat that as a clean completion rather than
+    -- keeping a 100% session alive forever.
+    if ok and session.kind == "restore"
+        and SS.isKnowledgeActionContextValid(session.player, session.device, session.kind)
+        and SS.getRestoreDelta(session.player, session.device).skills <= 0 then
+        SS.clearKnowledgeProgress(session.device)
+        syncDevice(session.device)
+        session.elapsed = session.duration
+        finishSession(session, "complete", false)
+        return
+    end
+
+    saveCheckpoint(session)
+    finishSession(session, "rejected", false)
+end
+
+local function authoritativeTick()
+    if not authoritative() then return end
+    local multiplier = tonumber(getGameTime():getMultiplier()) or 0
+    if multiplier < 0 then multiplier = 0 end
+
+    local sessions = {}
+    for _, session in pairs(SS._knowledgeSessions) do
+        sessions[#sessions + 1] = session
+    end
+
+    for _, session in ipairs(sessions) do
+        if SS._knowledgeSessions[session.device] == session then
+            local player = session.player
+            local device = session.device
+
+            -- Ownership loss is terminal for this in-memory session. The
+            -- mirrored checkpoint remains on the loaded device/CD.
+            if not player or player:isDead()
+                or SS.findDeviceById(player, session.itemId) ~= device then
+                saveCheckpoint(session)
+                finishSession(session, "stopped", false)
+            else
+                local valid = SS.isKnowledgeActionContextValid(
+                    player, device, session.kind)
+                if valid then
+                    session.elapsed = session.elapsed + multiplier
+                    saveCheckpoint(session)
+                    if session.elapsed >= session.duration then
+                        completeSession(session)
+                    else
+                        pushState(session, "running", false)
+                    end
+                else
+                    -- rc0.4: any required-condition loss is terminal for the
+                    -- in-memory session. Preserve the whole-page checkpoint on
+                    -- the loaded CD and require an explicit Play to resume.
+                    saveCheckpoint(session)
+                    finishSession(session, "stopped", false)
+                end
+            end
+        end
+    end
+end
+
+local function sendTerminalState(player, itemId, kind, phase, progress)
+    if not isServer() or not player then return end
+    sendServerCommand(player, SS.MODULE, "knowledgeState", {
+        onlineID = player:getOnlineID(),
+        itemId = tonumber(itemId),
+        kind = tostring(kind or ""),
+        phase = tostring(phase or "rejected"),
+        progress = clamp01(progress or 0),
+    })
+end
+
+local function handleClientCommand(module, command, player, args)
+    if not isServer() or module ~= SS.MODULE or not player
+        or type(args) ~= "table" then
+        return
+    end
+    if command ~= "knowledgeStart" and command ~= "knowledgeStop" then return end
+
+    local itemId = tonumber(args.itemId)
+    local kind = tostring(args.kind or "")
+    local device = itemId and SS.findDeviceById(player, itemId) or nil
+
+    if command == "knowledgeStart" then
+        if not device or not SS.startKnowledgeSession(player, device, kind) then
+            sendTerminalState(player, itemId, kind, "rejected", 0)
+        end
+        return
+    end
+
+    if not device or not SS.stopKnowledgeSession(player, device, "stopped") then
+        sendTerminalState(player, itemId, kind, "stopped", 0)
+    end
+end
+
+local function handleServerCommand(module, command, args)
+    if not isClient() or module ~= SS.MODULE or command ~= "knowledgeState"
+        or type(args) ~= "table" then
+        return
+    end
+
+    local id = tonumber(args.itemId)
+    local progress = tonumber(args.progress)
+    local kind = tostring(args.kind or "")
+    local phase = tostring(args.phase or "")
+    if not id or (kind ~= "record" and kind ~= "restore")
+        or not progress or progress < 0 or progress > 1 then
+        return
+    end
+
+    SS._clientKnowledgePending[id] = nil
+    local onlineID = tonumber(args.onlineID)
+    local localPlayer = onlineID and getPlayerByOnlineID(onlineID) or getPlayer()
+    if not localPlayer or not localPlayer:isLocalPlayer() then return end
+    local device = SS.findDeviceById(localPlayer, id)
+    local active = phase == "running"
+
+    if active then
+        local state = {
+            itemId = id,
+            kind = kind,
+            phase = phase,
+            progress = progress,
+        }
+        SS._clientKnowledgeSessions[id] = state
+        SS._clientKnowledgeSessionByPlayer[localPlayer] = state
+        if device then markItem(device, kind, progress) end
+        setOverheadProgress(localPlayer, progress)
+    else
+        SS._clientKnowledgeSessions[id] = nil
+        if SS._clientKnowledgeSessionByPlayer[localPlayer]
+            and SS._clientKnowledgeSessionByPlayer[localPlayer].itemId == id then
+            SS._clientKnowledgeSessionByPlayer[localPlayer] = nil
+        end
+        if device and not (SS._activeMediaActions
+            and SS._activeMediaActions[device]) then
+            clearItem(device)
+        end
+        clearOverheadProgress(localPlayer)
+    end
+end
+
+local function refreshBackgroundOverheadProgress(player)
+    if isServer() or not player or not player:isLocalPlayer()
+        or hasForegroundTimedAction(player) then
+        return
+    end
+    local state
+    if isClient() then
+        state = SS._clientKnowledgeSessionByPlayer[player]
+    else
+        state = SS._knowledgeSessionByPlayer[player]
+    end
+    if state then
+        local value = state.progress
+        if value == nil then value = sessionProgress(state) end
+        setOverheadProgress(player, value)
+    else
+        clearOverheadProgress(player)
+    end
+end
+
+Events.OnTick.Add(authoritativeTick)
+Events.OnPlayerUpdate.Add(refreshBackgroundOverheadProgress)
+Events.OnClientCommand.Add(handleClientCommand)
+Events.OnServerCommand.Add(handleServerCommand)
