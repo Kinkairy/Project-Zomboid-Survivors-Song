@@ -26,11 +26,15 @@ end
 function SS.beginProgressView(action, label)
     if not isClient() then return end
     views[action.character] = action
-    action.progressView = { value = 0, sequence = 0, phase = "waiting",
+    local initial = 0
+    if action.plan and action.plan.pages and action.plan.pages > 0 then
+        initial = action.plan.startPage / action.plan.pages
+    end
+    action.progressView = { value = initial, sequence = 0, phase = "waiting",
         label = label, nextPoll = 0, receivedAt = nil }
     action.action:setTime(SS.PROGRESS_VIEW_SCALE)
-    action:setJobDelta(0)
-    action.item:setJobDelta(0)
+    action:setJobDelta(initial)
+    action.item:setJobDelta(initial)
 end
 
 function SS.endProgressView(action)
@@ -95,6 +99,12 @@ function SS.publishActionProgress(action, phase)
     local ok, err = pcall(function()
         local value = phase == "complete" and 1 or action.netAction:getProgress()
         if not finite(value) then return end
+        if phase ~= "complete" and action.plan and action.plan.pages
+            and action.plan.pages > 0 then
+            value = (action.plan.startPage
+                + (action.plan.pages - action.plan.startPage) * value)
+                / action.plan.pages
+        end
         action.progressSequence = (action.progressSequence or 0) + 1
         sendServerCommand(action.character, SS.MODULE, "progress", {
             onlineID = action.character:getOnlineID(),
