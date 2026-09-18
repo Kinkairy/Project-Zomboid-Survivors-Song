@@ -62,8 +62,8 @@ It reuses the vanilla CD player and vanilla `Base.Disc_Retail` item. A normal mu
 - Recording requires a blank disc, powered/on CD player, installed headphones/earbuds, and a vanilla microphone carried by the character.
 - Restore requires a recorded song, powered/on CD player, and installed headphones/earbuds; no microphone is required.
 - Multiplayer completion is server authoritative.
-- Interrupted recording/restoring saves a server-authoritative whole-page checkpoint; pressing Play again resumes only the remaining duration.
-- If a hotbar/equip/stow action targets the same CD player during recording/restoring, the knowledge action stops first, saves its checkpoint, and lets the normal shortcut continue.
+- Interrupted recording/restoring saves a server-authoritative whole-page checkpoint that logically belongs to the physical CD. While loaded, the checkpoint is mirrored on the CD player because the physical disc is represented by the native carrier; eject copies it back to the disc, and reinserting the same disc into any CD player restores it before Play resumes the remaining duration.
+- Hotbar compatibility is handled at the Hotbar mouse/keyboard/controller admission layer. A shortcut can interrupt the active Survivor's Song knowledge action first, let the server save the checkpoint, and then continue through the original equip/stow path.
 - Normal music playback can use vanilla duration or extend to 30, 60, or 120 game minutes.
 - Enhanced listening effects are limited to boredom, unhappiness, stress, panic, and anger.
 
