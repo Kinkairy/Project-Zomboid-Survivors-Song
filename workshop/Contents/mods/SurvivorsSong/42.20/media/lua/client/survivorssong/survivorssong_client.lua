@@ -1,4 +1,5 @@
 require "TimedActions/ISTimedActionQueue"
+require "Hotbar/ISHotbar"
 require "ISUI/ISInventoryPane"
 require "ISUI/ISInventoryPaneContextMenu"
 require "RadioCom/ISRadioAction"
@@ -27,23 +28,95 @@ local function deviceBusy(device)
     return activeKnowledgeAction(device) ~= nil or activeMediaAction(device) ~= nil
 end
 
--- Hotbar/attachment mods enqueue ordinary TimedActions for the real Radio
--- item. If that exact CD player is currently recording/restoring, cancel the
--- knowledge action first so the native equip/stow action can run immediately.
--- serverStop owns the authoritative checkpoint; the next Play resumes it.
-if not SS._timedActionAddWrapped then
-    local vanillaTimedActionAdd = ISTimedActionQueue.add
-    ISTimedActionQueue.add = function(action)
-        local item = action and action.item or nil
+local function activeKnowledgeForHotbarSlot(hotbar, slotIndex)
+    local item = hotbar and hotbar.attachedItems
+        and hotbar.attachedItems[slotIndex] or nil
+    local active = item and SS.isCDPlayer(item)
+        and activeKnowledgeAction(item) or nil
+    if active and active.character == hotbar.chr then
+        return active, item
+    end
+    return nil, item
+end
+
+local function activeAttachedKnowledge(hotbar)
+    if not hotbar or not hotbar.attachedItems then return nil end
+    for _, item in pairs(hotbar.attachedItems) do
         local active = item and SS.isCDPlayer(item)
             and activeKnowledgeAction(item) or nil
-        if active and active ~= action
-            and action.character == active.character then
-            active:forceStop()
-        end
-        return vanillaTimedActionAdd(action)
+        if active and active.character == hotbar.chr then return active end
     end
-    SS._timedActionAddWrapped = true
+    return nil
+end
+
+local function hotbarNonQueueGuardsPass(hotbar)
+    if not hotbar or isGamePaused() then return false end
+    local player = hotbar.chr or hotbar.character
+    if not player or player:isDead() or player:isAttacking() then return false end
+    local radial = getPlayerRadialMenu(hotbar.playerNum)
+    return not radial or not radial:isReallyVisible()
+end
+
+-- Vanilla Hotbar rejects every shortcut while any TimedAction is queued.
+-- Survivor's Song recording/restoring is intentionally long, so intercept only
+-- the hotbar entry points needed to interrupt that exact knowledge action.
+-- forceStop sends the normal native stop; authoritative serverStop saves the
+-- current disc checkpoint before the queued equip/stow action can run.
+if not SS._hotbarInterruptWrapped then
+    local vanillaHotbarMouseUp = ISHotbar.onMouseUp
+    function ISHotbar:onMouseUp(x, y)
+        if not ISMouseDrag.dragging then
+            local slotIndex = self:getSlotIndexAt(x, y)
+            local active = slotIndex and slotIndex > -1
+                and activeKnowledgeForHotbarSlot(self, slotIndex) or nil
+            if active and hotbarNonQueueGuardsPass(self) then
+                active:forceStop()
+                self:activateSlot(slotIndex)
+                return
+            end
+        end
+        return vanillaHotbarMouseUp(self, x, y)
+    end
+
+    local vanillaHotbarKeyPressed = ISHotbar.onKeyPressed
+    ISHotbar.onKeyPressed = function(key)
+        local player = getSpecificPlayer(0)
+        local hotbar = getPlayerHotbar(0)
+        local slotIndex = hotbar and hotbar:getSlotForKey(key) or -1
+        local active = hotbar and slotIndex and slotIndex > -1
+            and activeKnowledgeForHotbarSlot(hotbar, slotIndex) or nil
+        local speed = UIManager.getSpeedControls()
+        local radial = getPlayerRadialMenu(0)
+        if active and player and not player:isDead()
+            and (not speed or speed:getCurrentGameSpeed() ~= 0)
+            and not JoypadState.players[1]
+            and not player:isAttacking()
+            and (not radial or not radial:isReallyVisible())
+            and not hotbar.radialWasVisible then
+            active:forceStop()
+            hotbar:activateSlot(slotIndex)
+            return
+        end
+        return vanillaHotbarKeyPressed(key)
+    end
+
+    -- Mercenary Loadout's D-pad radio slice deliberately delegates to this
+    -- vanilla guard before calling Hotbar:activateSlot(). Preserve every stock
+    -- guard except the non-empty action queue when the queued action is the
+    -- active Survivor's Song knowledge action on an attached CD player.
+    local vanillaHotbarAllowed = ISHotbar.isAllowedToActivateSlot
+    function ISHotbar:isAllowedToActivateSlot()
+        if vanillaHotbarAllowed(self) then return true end
+        local joypad = JoypadState.players[(self.playerNum or 0) + 1]
+        local active = joypad and activeAttachedKnowledge(self) or nil
+        if active and hotbarNonQueueGuardsPass(self) then
+            active:forceStop()
+            return true
+        end
+        return false
+    end
+
+    SS._hotbarInterruptWrapped = true
 end
 
 local function requestMediaAction(player, device, kind, disc)
