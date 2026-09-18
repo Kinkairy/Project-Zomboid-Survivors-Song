@@ -254,7 +254,24 @@ function SurvivorsSongKnowledgeAction:isValid()
 end
 
 function SurvivorsSongKnowledgeAction:getDuration()
-    return self.duration or SS.getActionTime(self.kind, self.character, self.item)
+    if self.rejected then return 1 end
+    if not self.plan then
+        local delta = self.kind == "restore"
+            and SS.getRestoreDelta(self.character, self.item)
+            or SS.getRecordDelta(self.character, self.item)
+        local pages = SS.getActionPageCount(self.kind, delta)
+        local actor = SS.getActionActorKey(self.character)
+        local startPage = SS.getSavedKnowledgePage(self.item, self.kind, actor, pages)
+        local totalTime = SS.getActionTime(self.kind, self.character, self.item, delta)
+        self.plan = {
+            pages = pages,
+            startPage = startPage,
+            lastPage = startPage,
+            actor = actor,
+            duration = SS.getRemainingActionTime(totalTime, startPage, pages),
+        }
+    end
+    return self.plan.duration
 end
 
 function SurvivorsSongKnowledgeAction:isUsingTimeout()
@@ -263,11 +280,32 @@ function SurvivorsSongKnowledgeAction:isUsingTimeout()
     return false
 end
 
+local function knowledgePageAt(self, progress)
+    local p = self.plan
+    progress = math.max(0, math.min(1, tonumber(progress) or 0))
+    return p.startPage
+        + math.floor((p.pages - p.startPage) * progress + 0.000001)
+end
+
+function SurvivorsSongKnowledgeAction:saveProgress()
+    if isClient() or self.finished or not self.plan or not self.item then return end
+    if SS.findDeviceById(self.character, self.item:getID()) ~= self.item then return end
+    if SS.getActionActorKey(self.character) ~= self.plan.actor then return end
+    local progress = isServer() and self.netAction:getProgress() or self:getJobDelta()
+    local page = knowledgePageAt(self, progress)
+    if page <= self.plan.lastPage then return end
+    self.plan.lastPage = page
+    SS.saveKnowledgeProgress(self.item, self.kind, self.plan.actor, page, self.plan.pages)
+    if isServer() then syncDevice(self.item) end
+end
+
 function SurvivorsSongKnowledgeAction:start()
+    self:getDuration()
     SS._activeKnowledgeActions[self.item] = self
     local data = SS.getDeviceData(self.item)
     if data and data:isPlayingMedia() then data:StopPlayMedia() end
-    self.item:setJobDelta(0)
+    local initial = self.plan.startPage / self.plan.pages
+    self.item:setJobDelta(initial)
     local label = getText(self.kind == "record"
         and "ContextMenu_SurvivorsSong_RecordingCD"
         or "ContextMenu_SurvivorsSong_RestoringCD")
@@ -284,7 +322,11 @@ function SurvivorsSongKnowledgeAction:update()
         self:forceStop()
         return
     end
-    self.item:setJobDelta(self:getJobDelta())
+    local p = self.plan
+    local progress = math.max(0, math.min(1, self:getJobDelta()))
+    local overall = (p.startPage + (p.pages - p.startPage) * progress) / p.pages
+    self.item:setJobDelta(overall)
+    if not isServer() then self:saveProgress() end
 end
 
 local function clearKnowledgeJob(self)
@@ -301,12 +343,18 @@ local function clearKnowledgeJob(self)
 end
 
 function SurvivorsSongKnowledgeAction:stop()
+    if not isClient() then self:saveProgress() end
     clearKnowledgeJob(self)
     ISBaseTimedAction.stop(self)
 end
 
 function SurvivorsSongKnowledgeAction:forceCancel()
-    SS.endProgressView(self)
+    if not isClient() then self:saveProgress() end
+    if self.item and SS._activeKnowledgeActions[self.item] == self then
+        clearKnowledgeJob(self)
+    else
+        SS.endProgressView(self)
+    end
     ISBaseTimedAction.forceCancel(self)
 end
 
@@ -326,6 +374,7 @@ function SurvivorsSongKnowledgeAction:perform()
 end
 
 function SurvivorsSongKnowledgeAction:serverStart()
+    self:getDuration()
     if self.rejected or not SS.isKnowledgeActionValid(self.character, self.item, self.kind)
         or (SS._activeKnowledgeActions[self.item]
             and SS._activeKnowledgeActions[self.item] ~= self)
@@ -346,28 +395,35 @@ local function releaseKnowledgeServer(self)
 end
 
 function SurvivorsSongKnowledgeAction:serverStop()
+    self:saveProgress()
     SS.publishActionProgress(self, "cancelled")
     releaseKnowledgeServer(self)
 end
 
 function SurvivorsSongKnowledgeAction:complete()
     if isClient() then return false end
+    self:getDuration()
     if self.rejected
-        or not SS.isKnowledgeActionValid(self.character, self.item, self.kind) then
+        or not SS.isKnowledgeActionValid(self.character, self.item, self.kind)
+        or SS.getActionActorKey(self.character) ~= self.plan.actor then
+        self:saveProgress()
         SS.publishActionProgress(self, "rejected")
         releaseKnowledgeServer(self)
         return false
     end
 
+    self.finished = true
     SS.publishActionProgress(self, "applying")
     local ok, applied = pcall(function()
         if self.kind == "record" then
-            local changed = SS.commitRecord(self.character, self.item)
-            if changed then syncDevice(self.item) end
-            return changed
+            return SS.commitRecord(self.character, self.item)
         end
         return SS.applyRestore(self.character, self.item)
     end)
+    if ok and applied then
+        SS.clearKnowledgeProgress(self.item)
+        syncDevice(self.item)
+    end
     SS.publishActionProgress(self, ok and applied and "complete" or "rejected")
     releaseKnowledgeServer(self)
     if not ok then error(applied) end
@@ -395,8 +451,7 @@ function SurvivorsSongKnowledgeAction:new(character, item, kind, recipientKey, p
     o.forceProgressBar = true
     o.stopOnRun = true
     o.stopOnWalk = false
-    o.duration = (not o.rejected) and SS.getActionTime(kind, character, item) or 1
-    o.maxTime = isClient() and SS.PROGRESS_VIEW_SCALE or o.duration
+    o.maxTime = isClient() and SS.PROGRESS_VIEW_SCALE or o:getDuration()
     return o
 end
 
