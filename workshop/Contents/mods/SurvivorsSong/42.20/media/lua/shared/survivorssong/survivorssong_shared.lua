@@ -3,7 +3,7 @@ SurvivorsSong = SurvivorsSong or {}
 local SS = SurvivorsSong
 
 SS.VERSION = 2
-SS.BUILD = "rc0.1"
+SS.BUILD = "rc0.2"
 SS.MODULE = "SurvivorsSong"
 
 SS.RETAIL_CD_TYPE = "Base.Disc_Retail"
@@ -16,6 +16,7 @@ SS.MICROPHONE_TYPE = "Base.Microphone"
 SS.MODE_BLANK = "blank"
 SS.MODE_SONG = "song"
 SS.MEDIA_ACTION_TIME = 30
+SS.ACTION_PROGRESS_MODEL_VERSION = 1
 
 -- Skill-only workload constants mirror Personal Journal 1.3.
 SS.ACTION_PAGE_RATE_NUMERATOR = 7
@@ -243,6 +244,11 @@ local LOADED_FIELDS = {
     "SS_loadedAuthorName",
     "SS_loadedAuthorUser",
     "SS_loadedRecordedAt",
+    "SS_progressKind",
+    "SS_progressActor",
+    "SS_progressPage",
+    "SS_progressTotalPages",
+    "SS_progressModelVersion",
 }
 
 function SS.getLoadedMode(device)
@@ -298,6 +304,51 @@ function SS.getActionActorKey(player)
         if okId and value ~= nil then descId = tostring(value) end
     end
     return table.concat({ username(player), descId, characterName(player) }, "\31")
+end
+
+function SS.getSavedKnowledgePage(device, kind, actorKey, totalPages)
+    if not SS.isCDPlayer(device) then return 0 end
+    local md = device:getModData()
+    if tostring(md.SS_progressKind or "") ~= tostring(kind or "")
+        or tostring(md.SS_progressActor or "") ~= tostring(actorKey or "")
+        or tonumber(md.SS_progressModelVersion) ~= SS.ACTION_PROGRESS_MODEL_VERSION then
+        return 0
+    end
+    totalPages = math.max(1, math.floor(tonumber(totalPages) or 1))
+    local page = math.max(0, math.floor(tonumber(md.SS_progressPage) or 0))
+    return math.max(0, math.min(totalPages, page))
+end
+
+function SS.saveKnowledgeProgress(device, kind, actorKey, page, totalPages)
+    if not SS.isCDPlayer(device) then return false end
+    totalPages = math.max(1, math.floor(tonumber(totalPages) or 1))
+    page = math.max(0, math.min(totalPages,
+        math.floor(tonumber(page) or 0)))
+    local md = device:getModData()
+    md.SS_progressKind = tostring(kind or "")
+    md.SS_progressActor = tostring(actorKey or "")
+    md.SS_progressPage = page
+    md.SS_progressTotalPages = totalPages
+    md.SS_progressModelVersion = SS.ACTION_PROGRESS_MODEL_VERSION
+    return true
+end
+
+function SS.clearKnowledgeProgress(device)
+    if not SS.isCDPlayer(device) then return end
+    local md = device:getModData()
+    md.SS_progressKind = nil
+    md.SS_progressActor = nil
+    md.SS_progressPage = nil
+    md.SS_progressTotalPages = nil
+    md.SS_progressModelVersion = nil
+end
+
+function SS.getRemainingActionTime(totalTime, startPage, totalPages)
+    totalPages = math.max(1, math.floor(tonumber(totalPages) or 1))
+    startPage = math.max(0, math.min(totalPages,
+        math.floor(tonumber(startPage) or 0)))
+    return math.max(1, math.floor((tonumber(totalTime) or 1)
+        * ((totalPages - startPage) / totalPages)))
 end
 
 local function gameDateStamp()
@@ -640,12 +691,12 @@ local function getVanillaReadingTime(pageCount)
     return math.max(1, pageCount * minutesPerPage * minutesPerDay * 2)
 end
 
-function SS.getActionTime(kind, player, device)
+function SS.getActionTime(kind, player, device, delta)
     if player and player:isTimedActionInstant() then return 1 end
     local multiplierName = kind == "restore" and "RestoreTimeMultiplier" or "RecordTimeMultiplier"
     local multiplier = SS.getOptionNumber(multiplierName, 1.0, 0.1, 10.0)
-    local delta = kind == "restore" and SS.getRestoreDelta(player, device)
-        or SS.getRecordDelta(player, device)
+    delta = delta or (kind == "restore" and SS.getRestoreDelta(player, device)
+        or SS.getRecordDelta(player, device))
     local pages = SS.getActionPageCount(kind, delta)
 
     if kind == "restore" then
