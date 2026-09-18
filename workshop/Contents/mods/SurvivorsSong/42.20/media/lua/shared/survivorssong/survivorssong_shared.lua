@@ -237,6 +237,14 @@ function SS.makeCarrierCD(preferredIndex)
     return item, tonumber(item:getRecordedMediaIndex())
 end
 
+local PROGRESS_FIELDS = {
+    "SS_progressKind",
+    "SS_progressActor",
+    "SS_progressPage",
+    "SS_progressTotalPages",
+    "SS_progressModelVersion",
+}
+
 local LOADED_FIELDS = {
     "SS_loadedMode",
     "SS_loadedVersion",
@@ -244,12 +252,10 @@ local LOADED_FIELDS = {
     "SS_loadedAuthorName",
     "SS_loadedAuthorUser",
     "SS_loadedRecordedAt",
-    "SS_progressKind",
-    "SS_progressActor",
-    "SS_progressPage",
-    "SS_progressTotalPages",
-    "SS_progressModelVersion",
 }
+for _, key in ipairs(PROGRESS_FIELDS) do
+    LOADED_FIELDS[#LOADED_FIELDS + 1] = key
+end
 
 function SS.getLoadedMode(device)
     if not SS.isCDPlayer(device) then return nil end
@@ -306,9 +312,39 @@ function SS.getActionActorKey(player)
     return table.concat({ username(player), descId, characterName(player) }, "\31")
 end
 
-function SS.getSavedKnowledgePage(device, kind, actorKey, totalPages)
-    if not SS.isCDPlayer(device) then return 0 end
-    local md = device:getModData()
+local function holderModData(holder)
+    if not holder then return nil end
+    local ok, md = pcall(function() return holder:getModData() end)
+    if ok then return md end
+    return nil
+end
+
+function SS.snapshotKnowledgeProgress(holder)
+    local md = holderModData(holder)
+    local result = {}
+    if not md then return result end
+    for _, key in ipairs(PROGRESS_FIELDS) do
+        result[key] = md[key]
+    end
+    return result
+end
+
+function SS.restoreKnowledgeProgress(holder, snapshot)
+    local md = holderModData(holder)
+    if not md then return false end
+    for _, key in ipairs(PROGRESS_FIELDS) do
+        md[key] = snapshot and snapshot[key] or nil
+    end
+    return true
+end
+
+function SS.copyKnowledgeProgress(source, target)
+    return SS.restoreKnowledgeProgress(target, SS.snapshotKnowledgeProgress(source))
+end
+
+function SS.getSavedKnowledgePage(holder, kind, actorKey, totalPages)
+    local md = holderModData(holder)
+    if not md then return 0 end
     if tostring(md.SS_progressKind or "") ~= tostring(kind or "")
         or tostring(md.SS_progressActor or "") ~= tostring(actorKey or "")
         or tonumber(md.SS_progressModelVersion) ~= SS.ACTION_PROGRESS_MODEL_VERSION then
@@ -319,12 +355,12 @@ function SS.getSavedKnowledgePage(device, kind, actorKey, totalPages)
     return math.max(0, math.min(totalPages, page))
 end
 
-function SS.saveKnowledgeProgress(device, kind, actorKey, page, totalPages)
-    if not SS.isCDPlayer(device) then return false end
+function SS.saveKnowledgeProgress(holder, kind, actorKey, page, totalPages)
+    local md = holderModData(holder)
+    if not md then return false end
     totalPages = math.max(1, math.floor(tonumber(totalPages) or 1))
     page = math.max(0, math.min(totalPages,
         math.floor(tonumber(page) or 0)))
-    local md = device:getModData()
     md.SS_progressKind = tostring(kind or "")
     md.SS_progressActor = tostring(actorKey or "")
     md.SS_progressPage = page
@@ -333,14 +369,8 @@ function SS.saveKnowledgeProgress(device, kind, actorKey, page, totalPages)
     return true
 end
 
-function SS.clearKnowledgeProgress(device)
-    if not SS.isCDPlayer(device) then return end
-    local md = device:getModData()
-    md.SS_progressKind = nil
-    md.SS_progressActor = nil
-    md.SS_progressPage = nil
-    md.SS_progressTotalPages = nil
-    md.SS_progressModelVersion = nil
+function SS.clearKnowledgeProgress(holder)
+    SS.restoreKnowledgeProgress(holder, nil)
 end
 
 function SS.getRemainingActionTime(totalTime, startPage, totalPages)
@@ -432,9 +462,12 @@ function SS.setLoadedFromDisc(device, disc)
         md.SS_loadedAuthorName = tostring(source.SS_authorName or "")
         md.SS_loadedAuthorUser = tostring(source.SS_authorUser or "")
         md.SS_loadedRecordedAt = tostring(source.SS_recordedAt or "")
+        SS.copyKnowledgeProgress(disc, device)
         return true
     end
-    return SS.setBlankLoaded(device)
+    SS.setBlankLoaded(device)
+    SS.copyKnowledgeProgress(disc, device)
+    return true
 end
 
 function SS.getLoadedSkills(device)
@@ -456,6 +489,9 @@ function SS.makeEjectedCD(device)
     -- A fresh vanilla Base.Disc_Retail already has no RecordedMedia index.
     -- Do not call setRecordedMediaIndex(-1): that Java bridge call is not
     -- valid in the dedicated-server Lua runtime used by B42.20.
+    -- The interruption checkpoint belongs to the disc, so carry the loaded
+    -- semantic checkpoint back to the physical item on eject.
+    SS.copyKnowledgeProgress(device, item)
     if mode == SS.MODE_SONG then
         local source = device:getModData()
         local md = item:getModData()
