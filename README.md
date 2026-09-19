@@ -32,12 +32,8 @@ Survivor's Song 是面向 Project Zomboid Build 42.20 的 CD 技能记录 Mod。
 ### 仓库结构
 
 ```text
-docs/TECHNICAL_REFERENCE.md             技术参考
 translations/catalog.json               三语文本源
 workshop/Contents/mods/SurvivorsSong    Mod 运行源码
-CHANGELOG.md                            公开变更记录
-CONTRIBUTING.md                         贡献说明
-SECURITY.md                             安全问题说明
 ```
 
 公开仓库不包含内部测试工具、服务器地址、私有部署流程、发布凭据或原始运行日志。
@@ -76,12 +72,8 @@ It reuses the vanilla CD player and vanilla `Base.Disc_Retail` item. A normal mu
 ### Repository Layout
 
 ```text
-docs/TECHNICAL_REFERENCE.md             Technical reference
 translations/catalog.json               Reviewed trilingual source catalog
 workshop/Contents/mods/SurvivorsSong    Runtime source
-CHANGELOG.md                            Public change history
-CONTRIBUTING.md                         Contribution notes
-SECURITY.md                             Security policy
 ```
 
 The public repository excludes internal test harnesses, server addresses, private deployment workflows, publishing credentials, and raw runtime logs.
