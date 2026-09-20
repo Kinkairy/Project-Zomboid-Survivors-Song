@@ -1,1 +1,7 @@
-{"IGUI_SurvivorsSong_Applying":"%1 — 正在處理結果","IGUI_SurvivorsSong_SongName":"%1的歌","IGUI_SurvivorsSong_WaitActionDone":"%1 — 等待動作完成確認","IGUI_SurvivorsSong_WaitServer":"%1 — 等待伺服器進度","IGUI_SurvivorsSong_RecordedAt":"記錄時間：%1"}
+{
+    "IGUI_SurvivorsSong_SongName": "CD: %1的歌",
+    "IGUI_SurvivorsSong_WaitServer": "%1 — 等待伺服器進度",
+    "IGUI_SurvivorsSong_Applying": "%1 — 正在處理結果",
+    "IGUI_SurvivorsSong_WaitActionDone": "%1 — 等待動作完成確認",
+    "IGUI_SurvivorsSong_RecordedAt": "記錄時間：%1"
+}

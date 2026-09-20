@@ -134,14 +134,14 @@ local function pushState(session, phase, force)
     end
 end
 
-local function saveCheckpoint(session)
+local function saveCheckpoint(session, publish)
     if not session or not session.device then return end
     local page = sessionPage(session)
     if page <= session.lastPage then return end
     session.lastPage = page
     SS.saveKnowledgeProgress(session.device, session.kind,
         session.actor, page, session.pages)
-    syncDevice(session.device)
+    if publish ~= false then syncDevice(session.device) end
 end
 
 local function removeSession(session)
@@ -331,6 +331,15 @@ local function authoritativeTick()
         sessions[#sessions + 1] = session
     end
 
+    -- B42.20 has no server OnPlayerDisconnect(ed) Lua event. Use the
+    -- engine's online-player list before advancing any authoritative session.
+    local online
+    if isServer() and #sessions > 0 then
+        online = {}
+        local players = getOnlinePlayers()
+        for index = 0, players:size() - 1 do online[players:get(index)] = true end
+    end
+
     for _, session in ipairs(sessions) do
         if SS._knowledgeSessions[session.device] == session then
             local player = session.player
@@ -338,7 +347,11 @@ local function authoritativeTick()
 
             -- Ownership loss is terminal for this in-memory session. The
             -- mirrored checkpoint remains on the loaded device/CD.
-            if not player or player:isDead()
+            if online and not online[player] then
+                saveCheckpoint(session, false)
+                removeSession(session)
+                -- No terminal packet may be sent to a disconnected player.
+            elseif not player or player:isDead()
                 or SS.findDeviceById(player, session.itemId) ~= device then
                 saveCheckpoint(session)
                 finishSession(session, "stopped", false)
@@ -414,10 +427,10 @@ local function handleServerCommand(module, command, args)
         return
     end
 
-    SS._clientKnowledgePending[id] = nil
     local onlineID = tonumber(args.onlineID)
-    local localPlayer = onlineID and getPlayerByOnlineID(onlineID) or getPlayer()
+    local localPlayer = onlineID and getPlayerByOnlineID(onlineID) or nil
     if not localPlayer or not localPlayer:isLocalPlayer() then return end
+    SS._clientKnowledgePending[id] = nil
     local device = SS.findDeviceById(localPlayer, id)
     local active = phase == "running"
 
@@ -466,7 +479,20 @@ local function refreshBackgroundOverheadProgress(player)
     end
 end
 
+local function clearDisconnectedClient()
+    if isServer() then return end
+    for player, state in pairs(SS._clientKnowledgeSessionByPlayer) do
+        local device = SS.findDeviceById(player, state.itemId)
+        if device then clearItem(device) end
+        clearOverheadProgress(player)
+    end
+    SS._clientKnowledgeSessions = {}
+    SS._clientKnowledgePending = {}
+    SS._clientKnowledgeSessionByPlayer = setmetatable({}, { __mode = "k" })
+end
+
 Events.OnTick.Add(authoritativeTick)
 Events.OnPlayerUpdate.Add(refreshBackgroundOverheadProgress)
 Events.OnClientCommand.Add(handleClientCommand)
 Events.OnServerCommand.Add(handleServerCommand)
+Events.OnDisconnect.Add(clearDisconnectedClient)

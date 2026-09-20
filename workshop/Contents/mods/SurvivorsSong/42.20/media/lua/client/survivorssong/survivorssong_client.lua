@@ -9,6 +9,41 @@ require "survivorssong/survivorssong_actions"
 
 local SS = SurvivorsSong
 
+-- Match Personal Journal: localize names before the native visible-container
+-- refresh groups them. Late server name packets are corrected only when needed.
+local localSongNames = setmetatable({}, { __mode = "k" })
+local function refreshVisibleSongNames(container)
+    if not container then return end
+    local items = container:getItems()
+    if not items then return end
+    for index = 0, items:size() - 1 do
+        local item = items:get(index)
+        SS.refreshSongPresentation(item)
+        localSongNames[item] = SS.isKnowledgeCD(item) and item:getName() or nil
+    end
+end
+
+if not ISInventoryPane.SurvivorsSongPresentationInstalled then
+    local vanillaRefreshContainer = ISInventoryPane.refreshContainer
+    local vanillaDrawItemIcon = ISInventoryPane.drawItemIcon
+
+    function ISInventoryPane:refreshContainer(...)
+        refreshVisibleSongNames(self.inventory)
+        return vanillaRefreshContainer(self, ...)
+    end
+
+    function ISInventoryPane:drawItemIcon(item, ...)
+        local expected = localSongNames[item]
+        if expected and item:getName() ~= expected then
+            SS.refreshSongPresentation(item)
+            localSongNames[item] = SS.isKnowledgeCD(item) and item:getName() or nil
+        end
+        return vanillaDrawItemIcon(self, item, ...)
+    end
+
+    ISInventoryPane.SurvivorsSongPresentationInstalled = true
+end
+
 -- Match Personal Journal's tooltip strategy: supply localized recorded-time
 -- metadata only while vanilla ISToolTipInv renders this physical song CD.
 if not ISToolTipInv.SurvivorsSongTooltipInstalled then
@@ -174,11 +209,6 @@ function RWMMedia:update()
     local mode = SS.getLoadedMode(self.device)
     if not mode then return end
 
-    -- A blank/song disc never enters native RecordedMedia playback.
-    if self.deviceData:isPlayingMedia() then
-        self.deviceData:StopPlayMedia()
-    end
-
     self.itemDropBox:setStoredItemFake(self.cdTex)
 
     local session = activeKnowledgeSession(self.device)
@@ -222,65 +252,8 @@ function RWMMedia:getAPrompt()
     return vanillaGetAPrompt(self)
 end
 
-local function collectInsertableCDs(player)
-    local medias = {}
-    local inventory = player and player:getInventory() or nil
-    if not inventory then return medias end
-
-    local retail = inventory:FindAll(SS.RETAIL_CD_TYPE)
-    for index = 0, retail:size() - 1 do
-        medias[#medias + 1] = retail:get(index)
-    end
-
-    return medias
-end
-
-local vanillaGetBPrompt = RWMMedia.getBPrompt
-function RWMMedia:getBPrompt()
-    local vanillaPrompt = vanillaGetBPrompt(self)
-    if vanillaPrompt or not self.device or not SS.isCDPlayer(self.device)
-        or self.deviceData:hasMedia() then
-        return vanillaPrompt
-    end
-
-    -- Vanilla owns normal RecordedMedia. Blank/song discs are the same real
-    -- Base.Disc_Retail type with no native RecordedMedia index.
-    local inventory = self.player and self.player:getInventory() or nil
-    local discs = inventory and inventory:FindAll(SS.RETAIL_CD_TYPE) or nil
-    if discs then
-        for index = 0, discs:size() - 1 do
-            local disc = discs:get(index)
-            if SS.isBlankCD(disc) or SS.isKnowledgeCD(disc) then
-                return getText("IGUI_media_addMedia")
-            end
-        end
-    end
-    return nil
-end
-
-local vanillaJoypadDown = RWMMedia.onJoypadDown
-function RWMMedia:onJoypadDown(button)
-    if self.device and SS.isCDPlayer(self.device) then
-        if button == Joypad.AButton and SS.getLoadedMode(self.device) ~= nil then
-            self:togglePlayMedia()
-            return
-        end
-
-        if button == Joypad.BButton then
-            if self.deviceData:hasMedia() then
-                self:removeMedia()
-                return
-            end
-
-            local medias = collectInsertableCDs(self.player)
-            if #medias > 0 then
-                self:addMedia(medias)
-                return
-            end
-        end
-    end
-    return vanillaJoypadDown(self, button)
-end
+-- Native joypad A/B routing calls our narrow toggle/load/eject adapters.
+-- Blank/song discs already use Base.Disc_Retail, which vanilla enumerates.
 
 -- Normal native CD playback remains vanilla-owned. Survivor's Song only keeps
 -- it running until the selected game-time deadline; custom blank/song discs
@@ -288,6 +261,7 @@ end
 local playback = setmetatable({}, { __mode = "k" })
 local playerBuffMinute = setmetatable({}, { __mode = "k" })
 local lastScanMs = setmetatable({}, { __mode = "k" })
+local customStopRequested = setmetatable({}, { __mode = "k" })
 
 local function isNativeCDDeviceData(data)
     if not data then return false end
@@ -295,13 +269,30 @@ local function isNativeCDDeviceData(data)
     return okType and tonumber(mediaType) == 0 and data:hasMedia()
 end
 
-local function beginSession(player, data)
+local function itemForDevice(player, data, item)
+    if not player or not data then return nil end
+    if not item then
+        local ok, parent = pcall(function() return data:getParent() end)
+        if ok then item = parent end
+    end
+    if not item or not instanceof(item, "Radio") or not SS.isCDPlayer(item) then
+        return nil
+    end
+    if item:getDeviceData() ~= data then return nil end
+
+    local ok, owner = pcall(function() return item:getPlayer() end)
+    if ok and owner == player then return item end
+    return nil
+end
+
+local function beginSession(player, data, item)
     if not player or not isNativeCDDeviceData(data) then return nil end
 
     local duration = SS.getPlaybackDurationMinutes()
     local now = getGameTime():getMinutesStamp()
     local state = {
         player = player,
+        item = itemForDevice(player, data, item),
         mediaKey = SS.getMediaKey(data),
         deadlineMinute = duration > 0 and (now + duration) or nil,
         wasPlaying = data:isPlayingMedia(),
@@ -311,7 +302,33 @@ local function beginSession(player, data)
 end
 
 local function cancelSession(data)
-    if data then playback[data] = nil end
+    if not data then return end
+    local state = playback[data]
+    if state then state.item = nil end
+    playback[data] = nil
+end
+
+local function terminateSession(state)
+    if not state or state.terminal then return end
+    state.terminal = true
+    state.startPending = nil
+    state.item = nil
+end
+
+-- Optional mounted-address adapter; Survivor's Song remains independent of MLO.
+-- Ordinary held/SP devices continue through their native methods unchanged.
+local function requestNativeMedia(player, data, playing)
+    local mounted = MercenaryLoadout
+    if mounted and mounted.onNativeMediaRequest then mounted.onNativeMediaRequest(data, playing) end
+    if mounted and mounted.requestMountedMedia
+        and mounted.requestMountedMedia(player, data, playing) then return end
+    if playing then data:StartPlayMedia() else data:StopPlayMedia() end
+end
+
+local function requestNativeReplay(state, data)
+    state.wasPlaying = false
+    state.startPending = true
+    requestNativeMedia(state.player, data, true)
 end
 
 -- Manual Stop remains terminal even when an extended game-time deadline exists.
@@ -319,19 +336,26 @@ local vanillaTogglePlayMedia = ISRadioAction.performTogglePlayMedia
 function ISRadioAction:performTogglePlayMedia(...)
     local data = self.deviceData
     local wasPlaying = data and data:isPlayingMedia() or false
-    if wasPlaying then cancelSession(data) end
-
     local result = vanillaTogglePlayMedia(self, ...)
 
-    if not wasPlaying and data and data:isPlayingMedia()
-        and isNativeCDDeviceData(data) then
-        beginSession(self.character, data)
+    if isNativeCDDeviceData(data) then
+        if wasPlaying then
+            -- Keep a terminal session while SP drains its stop tail or MP
+            -- waits for ACK. A stale true flag must not create a new deadline.
+            local state = playback[data] or beginSession(self.character, data)
+            terminateSession(state)
+        elseif data:getIsTurnedOn() then
+            local state = beginSession(self.character, data)
+            if state and not data:isPlayingMedia() then
+                state.startPending = true
+            end
+        end
     end
     return result
 end
 
 local function applyBuffOncePerMinute(player, data)
-    local minute = getGameTime():getMinutesStamp()
+    local minute = math.floor(getGameTime():getMinutesStamp())
     if playerBuffMinute[player] == minute then return end
     playerBuffMinute[player] = minute
     SS.applyListeningEffect(player, data)
@@ -353,9 +377,17 @@ local function updateDevice(player, item)
 
     if SS.isCDPlayer(item) and SS.getLoadedMode(item) ~= nil then
         cancelSession(data)
-        if data and data:isPlayingMedia() then data:StopPlayMedia() end
+        if data and data:isPlayingMedia() then
+            if not customStopRequested[data] then
+                customStopRequested[data] = true
+                requestNativeMedia(player, data, false)
+            end
+        elseif data then
+            customStopRequested[data] = nil
+        end
         return
     end
+    if data then customStopRequested[data] = nil end
 
     if not SS.isCDPlayer(item) or not isNativeCDDeviceData(data) then
         cancelSession(data)
@@ -365,19 +397,27 @@ local function updateDevice(player, item)
     local now = getGameTime():getMinutesStamp()
     local playing = data:isPlayingMedia()
     local state = playback[data]
+    if state and state.mediaKey ~= SS.getMediaKey(data) then
+        cancelSession(data)
+        state = nil
+    end
+    -- Retain this tombstone until an explicit Play or a different disc starts
+    -- a session. Clearing it on the first false poll permits a late ACK to rearm.
+    if state and state.terminal then return end
+    if state and state.deadlineMinute and now >= state.deadlineMinute then
+        if playing or state.startPending then requestNativeMedia(player, data, false) end
+        terminateSession(state)
+        return
+    end
 
     if playing then
-        if not state or state.mediaKey ~= SS.getMediaKey(data) then
-            state = beginSession(player, data)
+        if not state then
+            state = beginSession(player, data, item)
         else
             state.player = player
+            state.item = item
             state.wasPlaying = true
-        end
-
-        if state and state.deadlineMinute and now >= state.deadlineMinute then
-            cancelSession(data)
-            data:StopPlayMedia()
-            return
+            state.startPending = nil
         end
 
         if isAudibleNormalPlayback(item, data) then
@@ -388,7 +428,17 @@ local function updateDevice(player, item)
 
     if not state then return end
     if not data:getIsTurnedOn() or not data:hasMedia() then
-        cancelSession(data)
+        terminateSession(state)
+        return
+    end
+    -- A native MP Play request may take more than one scan to be acknowledged.
+    if state.startPending then
+        if not SS.hasUsablePower(item) or not SS.hasHeadphones(item)
+            or data:getDeviceVolume() <= 0 then
+            terminateSession(state)
+            return
+        end
+
         return
     end
 
@@ -399,10 +449,9 @@ local function updateDevice(player, item)
         -- headphones are removed, power is unavailable, or volume is muted.
         if data:getIsTurnedOn() and SS.hasUsablePower(item)
             and SS.hasHeadphones(item) and data:getDeviceVolume() > 0 then
-            state.wasPlaying = false
-            data:StartPlayMedia()
+            requestNativeReplay(state, data)
         else
-            cancelSession(data)
+            terminateSession(state)
         end
         return
     end
@@ -418,6 +467,22 @@ local function scanPlayer(player)
     if now - last < 500 then return end
     lastScanMs[player] = now
 
+    local seen = {}
+    -- Once playback has begun, follow that exact native DeviceData through its
+    -- parent Radio. Some mounted-item integrations keep the Radio usable but
+    -- omit it from recursive inventory enumeration.
+    for data, state in pairs(playback) do
+        if state.player == player and not state.terminal then
+            local item = itemForDevice(player, data, state.item)
+                or itemForDevice(player, data, nil)
+            if item then
+                state.item = item
+                seen[data] = true
+                updateDevice(player, item)
+            end
+        end
+    end
+
     local inventory = player:getInventory()
     if not inventory then return end
 
@@ -429,9 +494,19 @@ local function scanPlayer(player)
         return SS.isCDPlayer(item)
     end)
     for index = 0, items:size() - 1 do
-        updateDevice(player, items:get(index))
+        local item = items:get(index)
+        local data = item and item:getDeviceData() or nil
+        if not seen[data] then updateDevice(player, item) end
     end
 end
 Events.OnPlayerUpdate.Add(scanPlayer)
+Events.OnDisconnect.Add(function()
+    -- The connection has ended; drop client-only ownership and deadline caches.
+    -- No play/stop request may be sent while tearing the connection down.
+    playback = setmetatable({}, { __mode = "k" })
+    playerBuffMinute = setmetatable({}, { __mode = "k" })
+    lastScanMs = setmetatable({}, { __mode = "k" })
+    customStopRequested = setmetatable({}, { __mode = "k" })
+end)
 
 print("[SurvivorsSong] client loaded build=" .. SS.BUILD)

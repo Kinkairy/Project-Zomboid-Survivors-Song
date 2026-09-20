@@ -3,7 +3,7 @@ SurvivorsSong = SurvivorsSong or {}
 local SS = SurvivorsSong
 
 SS.VERSION = 2
-SS.BUILD = "rc0.4"
+SS.BUILD = "rc0.4.1"
 SS.MODULE = "SurvivorsSong"
 
 SS.RETAIL_CD_TYPE = "Base.Disc_Retail"
@@ -106,7 +106,8 @@ function SS.getOptionNumber(name, defaultValue, minValue, maxValue)
     local ok, configured = pcall(function()
         local options = getSandboxOptions()
         local option = options and options:getOptionByName("SurvivorsSong." .. name)
-        return option and option:getValue() or nil
+        if option then return option:getValue() end
+        return nil
     end)
     if ok and finiteNumber(configured) then value = tonumber(configured) end
     if minValue ~= nil then value = math.max(minValue, value) end
@@ -119,7 +120,8 @@ function SS.isOptionEnabled(name, defaultValue)
     local ok, configured = pcall(function()
         local options = getSandboxOptions()
         local option = options and options:getOptionByName("SurvivorsSong." .. name)
-        return option and option:getValue() or nil
+        if option then return option:getValue() end
+        return nil
     end)
     if not ok or configured == nil then return value end
     if configured == true or tostring(configured) == "true" then return true end
@@ -129,7 +131,7 @@ end
 
 -- 1 = vanilla, 2 = 30, 3 = 60, 4 = 120 game minutes.
 function SS.getPlaybackDurationMinutes()
-    local option = math.floor(SS.getOptionNumber("PlaybackDuration", 1, 1, 4))
+    local option = math.floor(SS.getOptionNumber("PlaybackDuration", 3, 1, 4))
     if option == 1 then return 0 end
     if option == 2 then return 30 end
     if option == 4 then return 120 end
@@ -210,39 +212,41 @@ end
 -- Blank/song CDs occupy the native DeviceData media slot with a temporary
 -- vanilla CD RecordedMedia index. Presence/ejection therefore stays on the
 -- native hasMedia()/removeMediaItem() path instead of being faked in ModData.
-function SS.getCarrierMediaData(preferredIndex)
+function SS.getCarrierMediaData(preferredIndex, mediaCategory)
+    if not mediaCategory then return nil end
     local ok, recorded = pcall(function()
         return getZomboidRadio():getRecordedMedia()
     end)
     if not ok or not recorded then return nil end
 
-    if preferredIndex ~= nil then
-        local okData, data = pcall(function()
-            return recorded:getMediaDataFromIndex(tonumber(preferredIndex))
-        end)
-        if okData and data and tonumber(data:getMediaType()) == 0 then
-            return data
-        end
-    end
-
-    local okList, list = pcall(function() return recorded:getAllMediaForType(0) end)
+    -- Use the same category API as vanilla InvContextMedia. Lua numbers cannot
+    -- be passed to the Java short/byte index/type overloads on B42.20.
+    local okList, list = pcall(function()
+        return recorded:getAllMediaForCategory(mediaCategory)
+    end)
     if not okList or not list then return nil end
+    local preferred = tonumber(preferredIndex)
+    local fallback = nil
     for index = 0, list:size() - 1 do
         local data = list:get(index)
-        if data and tonumber(data:getMediaType()) == 0
-            and tonumber(data:getIndex()) and tonumber(data:getIndex()) >= 0 then
-            return data
+        if data and tonumber(data:getMediaType()) == 0 then
+            local mediaIndex = tonumber(data:getIndexForLua())
+            if mediaIndex and mediaIndex >= 0 then
+                if mediaIndex == preferred then return data end
+                fallback = fallback or data
+            end
         end
     end
-    return nil
+    return fallback
 end
 
 function SS.makeCarrierCD(preferredIndex)
-    local mediaData = SS.getCarrierMediaData(preferredIndex)
-    if not mediaData then return nil end
-
     local item = instanceItem(SS.RETAIL_CD_TYPE)
     if not item then return nil end
+    local mediaData = SS.getCarrierMediaData(preferredIndex,
+        item:getScriptItem():getRecordedMediaCat())
+    if not mediaData then return nil end
+
     item:setRecordedMediaData(mediaData)
 
     if not item:isRecordedMedia() or tonumber(item:getMediaType()) ~= 0 then
@@ -419,7 +423,7 @@ function SS.getSongName(authorName)
     if ok and translated and tostring(translated) ~= "IGUI_SurvivorsSong_SongName" then
         return tostring(translated)
     end
-    return authorName .. "'s Song"
+    return "CD: " .. authorName .. "'s Song"
 end
 
 function SS.isKnowledgeCD(item)
@@ -469,29 +473,6 @@ function SS.refreshSongPresentation(item)
         changed = true
     end
     return changed
-end
-
-function SS.setLoadedFromDisc(device, disc)
-    if not SS.isCDPlayer(device)
-        or (not SS.isBlankCD(disc) and not SS.isKnowledgeCD(disc)) then
-        return false
-    end
-    if SS.isKnowledgeCD(disc) then
-        local source = disc:getModData()
-        SS.clearLoadedMedia(device)
-        local md = device:getModData()
-        md.SS_loadedMode = SS.MODE_SONG
-        md.SS_loadedVersion = SS.VERSION
-        md.SS_loadedSkills = tostring(source.SS_skills or "")
-        md.SS_loadedAuthorName = tostring(source.SS_authorName or "")
-        md.SS_loadedAuthorUser = tostring(source.SS_authorUser or "")
-        md.SS_loadedRecordedAt = tostring(source.SS_recordedAt or "")
-        SS.copyKnowledgeProgress(disc, device)
-        return true
-    end
-    SS.setBlankLoaded(device)
-    SS.copyKnowledgeProgress(disc, device)
-    return true
 end
 
 function SS.getLoadedSkills(device)
@@ -735,7 +716,8 @@ local function getVanillaReadingTime(pageCount)
     local minutesPerPage = 2.0
     local okOption, configured = pcall(function()
         local option = getSandboxOptions():getOptionByName("MinutesPerPage")
-        return option and option:getValue() or nil
+        if option then return option:getValue() end
+        return nil
     end)
     if okOption and tonumber(configured) and tonumber(configured) >= 0 then
         minutesPerPage = tonumber(configured)
@@ -826,33 +808,16 @@ function SS.isMediaActionValid(player, device, kind, disc)
     return false
 end
 
--- Deterministic normal-CD effect profiles. Strength is intentionally fixed;
--- sandbox only selects which of the five negative mood states are eligible.
-SS.EFFECT_OPTION = {
-    BOREDOM = { option = "ReduceBoredom", default = true },
-    UNHAPPINESS = { option = "ReduceUnhappiness", default = true },
-    STRESS = { option = "ReduceStress", default = true },
-    PANIC = { option = "ReducePanic", default = false },
-    ANGER = { option = "ReduceAnger", default = false },
+-- Continuous effects retain vanilla interaction magnitudes, native stat bounds
+-- and native halo presentation. B42.20's radio handler still calls removed
+-- getStress/getPanic/getAnger methods; use the maintained CharacterStat API.
+SS.LISTENING_EFFECTS = {
+    { option = "ReduceBoredom", default = true, stat = "BOREDOM", amount = 5, halo = "Boredom" },
+    { option = "ReduceUnhappiness", default = true, stat = "UNHAPPINESS", amount = 5, halo = "Unhappiness" },
+    { option = "ReduceStress", default = true, stat = "STRESS", amount = 0.05, halo = "Stress" },
+    { option = "ReducePanic", default = false, stat = "PANIC", amount = 5, halo = "Panic" },
+    { option = "ReduceAnger", default = false, stat = "ANGER", amount = 0.05, halo = "Anger" },
 }
-
-SS.EFFECT_PROFILES = {
-    { id = "calm", effects = { STRESS=-0.006, PANIC=-0.010 } },
-    { id = "cheer", effects = { BOREDOM=-0.020, UNHAPPINESS=-0.014 } },
-    { id = "comfort", effects = { UNHAPPINESS=-0.010, STRESS=-0.005, ANGER=-0.010 } },
-    { id = "steady", effects = { PANIC=-0.006, STRESS=-0.004, BOREDOM=-0.010 } },
-    { id = "bright", effects = { BOREDOM=-0.014, UNHAPPINESS=-0.010, STRESS=-0.003 } },
-    { id = "release", effects = { UNHAPPINESS=-0.008, STRESS=-0.006, ANGER=-0.006 } },
-}
-
-local function stableHash(text)
-    local hash = 0
-    text = tostring(text or "")
-    for index = 1, #text do
-        hash = (hash * 131 + string.byte(text, index)) % 2147483647
-    end
-    return hash
-end
 
 function SS.getMediaKey(deviceData)
     if not deviceData then return "" end
@@ -866,74 +831,32 @@ function SS.getMediaKey(deviceData)
     return tostring(typeOk and mediaType or "") .. ":" .. tostring(indexOk and mediaIndex or "")
 end
 
-function SS.getEffectProfile(deviceData)
-    local profiles = SS.EFFECT_PROFILES
-    local key = SS.getMediaKey(deviceData)
-    local index = (stableHash(key) % #profiles) + 1
-    return profiles[index]
-end
-
-local function resolveCharacterStat(name)
-    if not CharacterStat then return nil end
-    return CharacterStat[name]
-end
-
-local EFFECT_HALO_SUFFIX = {
-    BOREDOM = "Boredom",
-    UNHAPPINESS = "Unhappiness",
-    STRESS = "Stress",
-    PANIC = "Panic",
-    ANGER = "Anger",
-}
-
-local function showListeningEffectHalo(player, statName)
-    if isServer() or not player or not player:isLocalPlayer()
-        or not HaloTextHelper then
-        return
-    end
-    local suffix = EFFECT_HALO_SUFFIX[statName]
-    if not suffix then return end
-    local key = "IGUI_HaloNote_" .. suffix
-    local label = getText(key)
-    if not label or tostring(label) == key then
-        local fallbackKey = "IGUI_StatsAndBody_" .. suffix
-        label = getText(fallbackKey)
-        if not label or tostring(label) == fallbackKey then
-            label = suffix
-        end
-    end
-    HaloTextHelper.addTextWithArrow(player, label, "[br/]", false,
-        HaloTextHelper.getGoodColor())
-end
-
 function SS.applyListeningEffect(player, deviceData)
-    if not player or player:isDead() or not deviceData or not deviceData:hasMedia() then return false end
+    if isServer() or not player or not player:isLocalPlayer()
+        or player:isDead() or player:isAsleep()
+        or not deviceData or not deviceData:hasMedia()
+        or not deviceData:isPlayingMedia() then
+        return false
+    end
     local stats = player:getStats()
     if not stats then return false end
-    local profile = SS.getEffectProfile(deviceData)
     local changed = false
-
-    for statName, fraction in pairs(profile.effects) do
-        local config = SS.EFFECT_OPTION[statName]
-        if config and SS.isOptionEnabled(config.option, config.default) then
-            local stat = resolveCharacterStat(statName)
-            if stat and finiteNumber(fraction) then
-                local minimum = tonumber(stat:getMinimumValue()) or 0
-                local maximum = tonumber(stat:getMaximumValue()) or 1
-                local amount = math.abs(tonumber(fraction)) * math.max(0, maximum - minimum)
-                if amount > 0 then
-                    local before = tonumber(stats:get(stat))
-                    stats:remove(stat, amount)
-                    local after = tonumber(stats:get(stat))
-                    if before and after and after < before then
-                        changed = true
-                        showListeningEffectHalo(player, statName)
-                    end
-                end
+    for _, effect in ipairs(SS.LISTENING_EFFECTS) do
+        if SS.isOptionEnabled(effect.option, effect.default) then
+            local stat = CharacterStat[effect.stat]
+            if stat and stats:add(stat, -effect.amount) then
+                changed = true
+                HaloTextHelper.addTextWithArrow(player,
+                    getText("IGUI_HaloNote_" .. effect.halo), "[br/]", false,
+                    HaloTextHelper.getGoodColor())
             end
         end
     end
-    return changed, profile.id
+    if changed then
+        local moodles = player:getMoodles()
+        if moodles then moodles:Update() end
+    end
+    return changed
 end
 
 print("[SurvivorsSong] shared loaded build=" .. SS.BUILD)

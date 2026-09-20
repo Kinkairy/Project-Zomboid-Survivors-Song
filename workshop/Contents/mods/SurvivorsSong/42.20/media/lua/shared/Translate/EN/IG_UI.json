@@ -1,1 +1,7 @@
-{"IGUI_SurvivorsSong_Applying":"%1 - applying results","IGUI_SurvivorsSong_SongName":"%1's Song","IGUI_SurvivorsSong_WaitActionDone":"%1 - waiting for action completion confirmation","IGUI_SurvivorsSong_WaitServer":"%1 - waiting for server progress","IGUI_SurvivorsSong_RecordedAt":"Recorded: %1"}
+{
+    "IGUI_SurvivorsSong_SongName": "CD: %1's Song",
+    "IGUI_SurvivorsSong_WaitServer": "%1 - waiting for server progress",
+    "IGUI_SurvivorsSong_Applying": "%1 - applying results",
+    "IGUI_SurvivorsSong_WaitActionDone": "%1 - waiting for action completion confirmation",
+    "IGUI_SurvivorsSong_RecordedAt": "Recorded: %1"
+}

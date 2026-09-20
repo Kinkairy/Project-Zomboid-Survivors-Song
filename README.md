@@ -1,84 +1,90 @@
 # Survivor's Song
 
-[简体中文](#简体中文) | [English](#english)
+Project Zomboid B42.20 independent functional mod.
 
-## 简体中文
+Current version: `rc0.4.1`. Recorded CD names use the native-style `CD: ` prefix and each player's language, including existing recordings.
 
-Survivor's Song 是面向 Project Zomboid Build 42.20 的 CD 技能记录 Mod。
+## Rebuild baseline
 
-它复用原版 CD 播放器和原版 `Base.Disc_Retail`，不新增实体 CD 类型。普通音乐 CD 可以在 CD 机内擦除为空白盘；空白盘可记录角色技能 XP，之后由允许的角色通过同一台原版 CD 播放器恢复缺失 XP。
+The R2 runtime implementation is rebuilt from the last accepted R0 source baseline:
 
-- 当前版本：`rc0.4`
-- Mod ID：`SurvivorsSong`
-- 目标版本：Project Zomboid Build 42.20
-- 支持语言：简体中文、繁体中文、English
-- 外部依赖：无
+`b7c95867e71f289584cd65d2516b6ffc3493aed4` — `Add Survivor's Song R0`
 
-### 核心设计
+It does not incrementally patch the failed R1 erased-disc runtime implementation. The maintenance layout and reviewed trilingual-catalog rule are retained, but the CD-player workflow below is a new implementation on top of R0 behavior.
 
-- 普通 RecordedMedia CD 仍由原版播放、字幕、媒体奖励和 Play/Stop 逻辑负责。
-- 擦除后的空白盘和录制后的歌曲盘仍是原版 `Base.Disc_Retail`。
-- 空白/歌曲盘在 CD 机中仍占用原版 DeviceData 媒体槽；ModData 只保存空白/歌曲语义、技能数据和中断检查点。
-- 录入需要：空白盘、CD 机开启且有电、已安装耳机/耳塞、角色携带原版麦克风。
-- 恢复需要：歌曲盘、CD 机开启且有电、已安装耳机/耳塞；不需要麦克风。
-- 录入/恢复使用服务器权威后台会话，不长期占用角色 TimedAction 队列，因此 CD 机可以像正常播放 CD 一样挂回角色附件位继续工作。
-- 角色头顶进度条仍显示服务器权威的录入/听取进度；如果前台另有正常 TimedAction，该前台动作优先使用同一进度条，结束后后台 CD 进度重新显示。
-- 麦克风、耳机/耳塞、电源、开关或合法手持/附件状态失效时，会保存当前整页检查点并结束本次会话；重新满足条件后按 Play 可从检查点继续。
-- 检查点逻辑属于物理 CD：弹出后换到另一台 CD 机仍可继续。
-- 歌曲 CD 保存并显示与 Personal Journal 1.3.2 相同格式的记录时间：`YYYY/MM/DD HH:MM`。
-- 普通音乐 CD 可选延长为原版时长、30、60 或 120 游戏分钟。
-- 普通音乐 CD 的增强听歌效果仅涉及无聊、不开心、压力、恐慌和愤怒；实际降低数值时会显示原版电视/广播风格的绿色向下提示。
+## Core gameplay
 
-### 仓库结构
+1. Insert a normal vanilla RecordedMedia CD into a vanilla `Base.CDplayer`.
+2. Right-click that CD player and choose **Erase CD**.
+3. The inserted disc becomes blank semantics. Its native device-media slot remains occupied so the original eject UI keeps working; when ejected the physical item is a erased vanilla `Base.Disc_Retail` with no RecordedMedia index.
+4. Insert/keep that blank CD, install headphones/earbuds in that exact CD player, carry vanilla `Base.Microphone`, turn the player on, and press the original **Play** button.
+5. Play starts a server-authoritative background skill-recording session instead of native RecordedMedia playback. The session does not occupy the character TimedAction queue and produces no music, subtitles, media reward, or Survivor's Song listening effect.
+6. Completion turns the disc into **`CD: <character>'s Song`** / **`CD: <角色>的歌`** while the ejected physical item remains vanilla `Base.Disc_Retail`.
+7. Insert the song into a powered/on CD player with headphones installed and press **Play** to start a background restore/listening session. A microphone is not required for restore.
+8. A recorded song can be erased back to blank.
 
-```text
-translations/catalog.json               三语文本源
-workshop/Contents/mods/SurvivorsSong    Mod 运行源码
-```
+No Record/Restore buttons are added to the device window. If blank/song requirements are not satisfied, the existing Play control is simply disabled; no character-overhead warning is emitted.
 
-公开仓库不包含内部测试工具、服务器地址、私有部署流程、发布凭据或原始运行日志。
+## Normal CD playback
 
-源码安装时，将 `workshop/Contents/mods/SurvivorsSong` 复制到 Project Zomboid Mods 目录。
+Normal RecordedMedia CDs keep vanilla sound, subtitles, media rewards and manual Play/Stop. Survivor's Song adds an optional game-time playback duration:
 
-这是非官方社区项目，与 The Indie Stone 无关联。项目采用 [MIT License](LICENSE)。
+- Vanilla;
+- 30 game minutes;
+- **60 game minutes (default)**;
+- 120 game minutes.
 
-## English
+If the native CD program finishes before a configured deadline, it starts again until the selected number of game minutes has elapsed. Manual Stop always ends the extension immediately.
 
-Survivor's Song is a CD-based skill-recording mod for Project Zomboid Build 42.20.
+The enhanced listening layer remains limited to Boredom, Unhappiness, Stress, Panic and Anger. Its strength is fixed; there is no strength-percentage sandbox option. Boredom/Unhappiness/Stress are enabled by default and Panic/Anger are opt-in. Effects apply only while a normal CD is actually audible: the player is on, powered, playing, has headphones/earbuds installed, and volume is above zero. rc0.3 also shows the same green downward HaloText style used by vanilla TV/radio interactions when an enabled negative mood stat actually decreases.
 
-It reuses the vanilla CD player and vanilla `Base.Disc_Retail` item. A normal music CD can be erased in the player, reused as a blank disc to record character skill XP, and later played through the same vanilla device to restore missing XP for an allowed character.
+R2.2 also aligns the long skill-record/restore action presentation with Personal Journal 1.3.2: multiplayer inventory and overhead progress bars display the same sampled server progress, including explicit waiting/applying/completion-confirmation phases. XP snapshot precision and restore comparisons follow the Journal 1.3.2 skill-only path.
 
-- Current version: `rc0.4`
-- Mod ID: `SurvivorsSong`
-- Target: Project Zomboid Build 42.20
-- Languages: Simplified Chinese, Traditional Chinese, English
-- External dependencies: none
+R2.3 fixes dedicated-server blank-CD creation by using vanilla B42.20 `instanceItem()` for both the temporary carrier and ejected `Base.CD`; this removes the server-only `InventoryItemFactory` null error during erase/eject.
 
-### Core Design
+R2.4 corrects the physical CD type for B42.20: there is no `Base.CD` item. Blank and recorded-song discs reuse vanilla `Base.Disc_Retail` with `RecordedMediaIndex=-1`, while temporary device-slot carriers remain `Base.Disc_Retail` with a valid native media index.
 
-- Normal RecordedMedia CDs remain owned by vanilla playback, subtitles, media rewards, and Play/Stop behavior.
-- Erased blank discs and recorded song discs remain vanilla `Base.Disc_Retail` items.
-- Blank/song discs still occupy the native DeviceData media slot; ModData stores Survivor's Song semantics, skill payload, and interruption checkpoint only.
-- Recording requires a blank disc, powered/on CD player, installed headphones/earbuds, and a vanilla microphone carried by the character.
-- Restore requires a recorded song, powered/on CD player, and installed headphones/earbuds; no microphone is required.
-- Record/restore runs as a server-authoritative background session rather than a long character TimedAction, so the CD player can be stowed on a valid character attachment while the session continues.
-- The character overhead progress bar displays authoritative background progress without blocking the normal TimedAction queue. Foreground TimedActions temporarily own that bar and the CD progress returns afterward.
-- Losing any required condition—microphone while recording, headphones, usable power, turned-on state, or valid held/attached placement—saves the current whole-page checkpoint and ends the current session. Press Play again after restoring the requirements to continue from the saved checkpoint.
-- The checkpoint logically follows the physical CD across eject/reinsert and across different CD players.
-- Recorded song CDs show the Personal Journal 1.3.2-style game timestamp `YYYY/MM/DD HH:MM` in their tooltip.
-- Normal music playback can use vanilla duration or extend to 30, 60, or 120 game minutes.
-- Enhanced normal-CD listening effects are limited to boredom, unhappiness, stress, panic, and anger. A vanilla TV/radio-style green downward HaloText appears only when an enabled negative mood stat actually decreases.
+R2.5 fixes dedicated-server eject by leaving a freshly created `Base.Disc_Retail` at its native default unrecorded state instead of calling `setRecordedMediaIndex(-1)` through the Java bridge.
 
-### Repository Layout
+## Project layout
 
-```text
-translations/catalog.json               Reviewed trilingual source catalog
-workshop/Contents/mods/SurvivorsSong    Runtime source
-```
+- `docs/` — runtime behavior and game-test plan.
+- `deployment/` — local/test copy helper only; it does not publish Workshop content or restart servers.
+- `translations/` — reviewed EN/CN/CH catalog and runtime synchronization tool.
+- `../../tests/survivors-song/` — offline structural/contract checks.
+- `../../tests/survivors-song/validate_workshop.py` — project-level validation entry point.
+- `workshop/Contents/mods/SurvivorsSong/` — deployable B42.20 payload.
 
-The public repository excludes internal test harnesses, server addresses, private deployment workflows, publishing credentials, and raw runtime logs.
+rc0.2 adds server-authoritative interruption checkpoints for recording/restoring. The checkpoint belongs to the physical CD: while the disc is loaded its state is mirrored on the CD player because the real physical item is temporarily replaced by the native media-slot carrier; eject copies the checkpoint back to the physical `Base.Disc_Retail`, and loading that same disc into any CD player restores it before Play resumes from the completed-page checkpoint.
 
-For source installation, copy `workshop/Contents/mods/SurvivorsSong` into the Project Zomboid Mods directory.
+rc0.4 keeps the rc0.3 background-session model and restores the character overhead progress bar from authoritative server progress without reoccupying the TimedAction queue. Mercenary Loadout and vanilla equip/stow shortcuts therefore remain normal while the visible overhead bar continues to represent the CD session.
 
-This is an unofficial community project and is not affiliated with The Indie Stone.
-Licensed under the [MIT License](LICENSE).
+Any required condition becoming invalid is terminal for the current in-memory session: ordinary-container storage, power-off, battery loss, missing headphones/earbuds, and a missing microphone during recording all save the current whole-page CD checkpoint and end the session. Re-satisfy the requirements and press Play again to resume from that saved CD checkpoint. Moving the active CD player between hand/equipment and a valid character attachment slot is not a failure and continues the same session.
+
+Recorded song CDs also reuse Personal Journal 1.3.2's recorded-time presentation: the same `YYYY/MM/DD HH:MM` game-time stamp is saved and the physical song CD tooltip shows `Recorded / 记录时间 / 記錄時間`.
+
+The active labels are intentionally short: recording shows `正在录入cd`; restoring shows `正在听取cd`.
+
+This is a test candidate, not a released Workshop package.
+
+## Current thin-shell repair
+
+Normal-CD enhancement applies every enabled mood option once per game minute,
+including repeated CDs. Magnitudes match native interaction units: Boredom,
+Unhappiness and Panic decrease by 5; Stress and Anger decrease by 0.05 on their
+0..1 scales. CharacterStat.add owns clamping; HaloTextHelper shows real changes.
+Vanilla media-line rewards remain separate. Disabling the enhancement does not
+disable native first-time media rewards. All-off disables every added effect.
+Sleeping, stopped, muted, unpowered or headphone-less listening grants no pulse.
+Multiple carried devices cannot stack pulses within one game minute.
+
+The native joypad router owns A/B controls and physical CD enumeration. Only
+custom load/eject/play adapters remain. The window renders device/session state;
+client action completion no longer writes optimistic disc metadata. Custom media
+stop requests are latched so a pending server reply or native stop tail cannot
+cause a repeated-stop loop.
+
+Authoritative knowledge sessions check the native online-player list before
+advancing. Disconnect retains whole-page checkpoints and releases the session
+without sending a packet to the absent player. Skill XP restoration retains
+the Personal Journal target-minus-current algorithm and native addXpNoMultiplier.

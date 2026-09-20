@@ -287,24 +287,14 @@ local function clearMediaJob(self)
     end
 end
 
-local function applyClientMirror(self)
-    if not isClient() or not self.item then return end
-    if self.kind == "erase" then
-        SS.setBlankLoaded(self.item)
-    elseif self.kind == "load" and self.secondaryItem then
-        SS.setLoadedFromDisc(self.item, self.secondaryItem)
-    elseif self.kind == "eject" then
-        SS.clearLoadedMedia(self.item)
-    end
-end
-
+-- The server's complete() mutates the disc and syncs the device. Client
+-- completion clears presentation only, including rejected/cancelled actions.
 function SurvivorsSongMediaAction:stop()
     clearMediaJob(self)
     ISBaseTimedAction.stop(self)
 end
 
 function SurvivorsSongMediaAction:perform()
-    applyClientMirror(self)
     clearMediaJob(self)
     ISBaseTimedAction.perform(self)
 end

@@ -1,1 +1,8 @@
-{"ContextMenu_SurvivorsSong_EraseCD":"Erase CD","ContextMenu_SurvivorsSong_ErasingCD":"Erasing CD","ContextMenu_SurvivorsSong_RecordingCD":"Recording CD","ContextMenu_SurvivorsSong_RestoringCD":"Listening to CD","ContextMenu_SurvivorsSong_NeedPower":"The CD player needs power.","ContextMenu_SurvivorsSong_DeviceBusy":"Stop the current CD action first."}
+{
+    "ContextMenu_SurvivorsSong_EraseCD": "Erase CD",
+    "ContextMenu_SurvivorsSong_ErasingCD": "Erasing CD",
+    "ContextMenu_SurvivorsSong_RecordingCD": "Recording CD",
+    "ContextMenu_SurvivorsSong_RestoringCD": "Listening to CD",
+    "ContextMenu_SurvivorsSong_NeedPower": "The CD player needs power.",
+    "ContextMenu_SurvivorsSong_DeviceBusy": "Stop the current CD action first."
+}
