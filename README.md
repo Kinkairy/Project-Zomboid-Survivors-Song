@@ -2,7 +2,7 @@
 
 Project Zomboid B42.20 independent functional mod.
 
-Current version: `rc0.4.1`. Recorded CD names use the native-style `CD: ` prefix and each player's language, including existing recordings.
+Current version: `rc0.4.2`. Fixes compatibility with native television, world radio and vehicle media windows by checking the device class before accessing inventory-item methods. Recorded CD names retain the native-style `CD: ` prefix and each player's language, including existing recordings.
 
 ## Rebuild baseline
 
@@ -65,7 +65,7 @@ Recorded song CDs also reuse Personal Journal 1.3.2's recorded-time presentation
 
 The active labels are intentionally short: recording shows `正在录入cd`; restoring shows `正在听取cd`.
 
-This is a test candidate, not a released Workshop package.
+Published Workshop item: `3803803266`.
 
 ## Current thin-shell repair
 

@@ -3,7 +3,7 @@ SurvivorsSong = SurvivorsSong or {}
 local SS = SurvivorsSong
 
 SS.VERSION = 2
-SS.BUILD = "rc0.4.1"
+SS.BUILD = "rc0.4.2"
 SS.MODULE = "SurvivorsSong"
 
 SS.RETAIL_CD_TYPE = "Base.Disc_Retail"
@@ -56,8 +56,11 @@ end
 SS.safeItemId = safeItemId
 
 function SS.isCDPlayer(item)
+    -- Native media windows also expose world devices and VehiclePart. Check
+    -- the Java class before calling InventoryItem methods: pcall still logs
+    -- invalid Java method calls in Kahlua on every window update.
+    if not item or not instanceof(item, "Radio") then return false end
     return safeFullType(item) == SS.CD_PLAYER_TYPE
-        and (type(instanceof) ~= "function" or instanceof(item, "Radio"))
 end
 
 function SS.isRecordedRetailCD(item)
