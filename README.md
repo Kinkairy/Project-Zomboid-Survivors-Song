@@ -2,7 +2,7 @@
 
 Project Zomboid B42.20 independent functional mod.
 
-Current version: `rc0.4.2`. Fixes compatibility with native television, world radio and vehicle media windows by checking the device class before accessing inventory-item methods. Recorded CD names retain the native-style `CD: ` prefix and each player's language, including existing recordings.
+Current version: `rc0.4.3`. Extends the native UI compatibility guards to generic inventory-item inspection: non-`InventoryItem` Java components such as `FluidContainer` are rejected before CD item methods are called, preventing liquid-transfer tooltip debugger errors. Recorded CD names retain the native-style `CD: ` prefix and each player's language, including existing recordings.
 
 ## Rebuild baseline
 

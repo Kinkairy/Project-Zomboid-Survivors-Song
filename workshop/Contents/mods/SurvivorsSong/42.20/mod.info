@@ -1,5 +1,5 @@
 name=Survivor's Song
 id=SurvivorsSong
 icon=icon.png
-modversion=rc0.4.2
+modversion=rc0.4.3
 description=B42.20 | Multiplayer. Extends normal CD playback and lets erased vanilla CDs record character skill XP and later restore missing XP through a vanilla CD player. / 延长普通 CD 的播放时间，并允许擦除后的原版 CD 记录角色技能经验，之后通过原版 CD 机恢复缺失经验。 / 延長普通 CD 的播放時間，並允許擦除後的原版 CD 記錄角色技能經驗，之後透過原版 CD 機恢復缺失經驗。

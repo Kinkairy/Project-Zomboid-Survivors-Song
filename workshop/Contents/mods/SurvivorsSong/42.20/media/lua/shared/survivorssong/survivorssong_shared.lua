@@ -3,7 +3,7 @@ SurvivorsSong = SurvivorsSong or {}
 local SS = SurvivorsSong
 
 SS.VERSION = 2
-SS.BUILD = "rc0.4.2"
+SS.BUILD = "rc0.4.3"
 SS.MODULE = "SurvivorsSong"
 
 SS.RETAIL_CD_TYPE = "Base.Disc_Retail"
