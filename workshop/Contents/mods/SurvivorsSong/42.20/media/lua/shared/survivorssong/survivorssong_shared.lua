@@ -40,7 +40,10 @@ local function normalizeStoredSkillXp(value)
 end
 
 local function safeFullType(item)
-    if not item then return nil end
+    -- Fluid-transfer and other native UI paths may pass Java components such
+    -- as FluidContainer here. Kahlua still reports an invalid Java method call
+    -- even when getFullType() is wrapped in pcall, so reject non-items first.
+    if not item or not instanceof(item, "InventoryItem") then return nil end
     local ok, value = pcall(function() return item:getFullType() end)
     if not ok or not value then return nil end
     return tostring(value)
