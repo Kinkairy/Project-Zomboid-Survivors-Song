@@ -154,18 +154,21 @@ function RWMMedia:removeMedia()
     return vanillaRemoveMedia(self)
 end
 
-local function getCustomKind(device)
-    local mode = SS.getLoadedMode(device)
-    if mode == SS.MODE_BLANK then return "record" end
-    if mode == SS.MODE_SONG then return "restore" end
-    return nil
-end
-
-local function canStartCustom(player, device)
-    local kind = getCustomKind(device)
-    if kind == "record" then return SS.canRecord(player, device), kind end
-    if kind == "restore" then return SS.canRestore(player, device), kind end
-    return false, nil
+-- Presentation-only sampling. Requests always revalidate without this cache.
+local function customChoiceView(window)
+    local t = getTimestampMs()
+    local mode = SS.getLoadedMode(window.device)
+    local md = window.device and window.device:getModData() or {}
+    local view = window.SurvivorsSongChoiceView
+    if not view or view.player ~= window.player or view.device ~= window.device
+        or view.mode ~= mode or view.skills ~= md.SS_loadedSkills
+        or t < view.at or t - view.at >= 250 then
+        local kind, allowed = SS.getKnowledgeActionChoice(window.player, window.device)
+        view = { player = window.player, device = window.device, mode = mode,
+            skills = md.SS_loadedSkills, at = t, kind = kind, allowed = allowed }
+        window.SurvivorsSongChoiceView = view
+    end
+    return view.kind, view.allowed
 end
 
 local vanillaMediaToggle = RWMMedia.togglePlayMedia
@@ -173,17 +176,15 @@ function RWMMedia:togglePlayMedia()
     if self.device and SS.isCDPlayer(self.device) then
         if activeMediaAction(self.device) then return end
 
-        local kind = getCustomKind(self.device)
-        if kind then
+        if SS.getLoadedMode(self.device) ~= nil then
+            self.SurvivorsSongChoiceView = nil
             local session = activeKnowledgeSession(self.device)
             if session then
                 SS.requestKnowledgeSessionStop(self.player, self.device)
                 return
             end
 
-            local allowed = kind == "record"
-                and SS.canRecord(self.player, self.device)
-                or SS.canRestore(self.player, self.device)
+            local kind, allowed = SS.getKnowledgeActionChoice(self.player, self.device)
             if not allowed then return end
 
             if self:doWalkTo() then
@@ -216,7 +217,7 @@ function RWMMedia:update()
         self.toggleOnOffButton:setEnable(true)
         self.toggleOnOffButton:setTitle(self.textStop)
     else
-        local allowed = canStartCustom(self.player, self.device)
+        local _, allowed = customChoiceView(self)
         self.toggleOnOffButton:setEnable(allowed == true)
         self.toggleOnOffButton:setTitle(self.textPlay)
     end
@@ -245,7 +246,7 @@ function RWMMedia:getAPrompt()
         local mode = SS.getLoadedMode(self.device)
         if mode then
             if activeKnowledgeSession(self.device) then return self.textStop end
-            local allowed = canStartCustom(self.player, self.device)
+            local _, allowed = customChoiceView(self)
             return allowed and self.textPlay or nil
         end
     end

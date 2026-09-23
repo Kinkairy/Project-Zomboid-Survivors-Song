@@ -3,7 +3,7 @@ SurvivorsSong = SurvivorsSong or {}
 local SS = SurvivorsSong
 
 SS.VERSION = 2
-SS.BUILD = "rc0.4.3"
+SS.BUILD = "rc0.4.4"
 SS.MODULE = "SurvivorsSong"
 
 SS.RETAIL_CD_TYPE = "Base.Disc_Retail"
@@ -453,16 +453,25 @@ function SS.getSongTooltip(item)
     return getText(SS.RECORDED_AT_TEXT_KEY, recordedAt)
 end
 
+
 function SS.canUseKnowledgeRecord(player, itemOrDevice)
     if not player then return false end
-    local savedUser = ""
+    local savedUser, savedName
     if SS.isKnowledgeCD(itemOrDevice) then
-        savedUser = tostring(itemOrDevice:getModData().SS_authorUser or "")
+        local md = itemOrDevice:getModData()
+        savedUser, savedName = md.SS_authorUser, md.SS_authorName
     elseif SS.isCDPlayer(itemOrDevice) and SS.getLoadedMode(itemOrDevice) == SS.MODE_SONG then
-        savedUser = tostring(itemOrDevice:getModData().SS_loadedAuthorUser or "")
+        local md = itemOrDevice:getModData()
+        savedUser, savedName = md.SS_loadedAuthorUser, md.SS_loadedAuthorName
+    else
+        return false
     end
+    -- Same account-first / name-fallback rule as Personal Journal isAuthor.
+    -- Old unnamed/unbound records are not claimed or erased automatically.
+    savedUser = tostring(savedUser or "")
     local currentUser = username(player)
-    return savedUser == "" or currentUser == "" or savedUser == currentUser
+    if savedUser ~= "" and currentUser ~= "" then return savedUser == currentUser end
+    return tostring(savedName or "") == characterName(player)
 end
 
 function SS.refreshSongPresentation(item)
@@ -553,52 +562,64 @@ function SS.captureSkills(player)
     return result
 end
 
+
+-- Personal Journal 1.3.2 skill codec, kept independent of its optional content.
+-- Preserve raw XP in storage; normalize only growth/restore comparisons.
 function SS.encodeSkills(skills)
     local keys = {}
     for perkId, xp in pairs(skills or {}) do
-        if tostring(perkId or "") ~= "" and normalizeStoredSkillXp(xp) > 0 then
-            keys[#keys + 1] = tostring(perkId)
+        if perkId and finiteNumber(xp) and tonumber(xp) > 0 then
+            table.insert(keys, tostring(perkId))
         end
     end
     table.sort(keys)
-    local out = {}
+    local parts = {}
     for _, perkId in ipairs(keys) do
-        out[#out + 1] = perkId .. "=" .. tostring(normalizeStoredSkillXp(skills[perkId]))
+        table.insert(parts, perkId .. "=" .. tostring(skills[perkId]))
     end
-    return table.concat(out, ";")
+    return table.concat(parts, ";")
 end
 
 function SS.decodeSkills(encoded)
     local result = {}
-    if encoded == nil or tostring(encoded) == "" then return result end
+    if not encoded or encoded == "" then return result end
     for token in string.gmatch(tostring(encoded), "[^;]+") do
-        local equal = string.find(token, "=", 1, true)
-        if equal then
-            local perkId = string.sub(token, 1, equal - 1)
-            local xp = normalizeStoredSkillXp(string.sub(token, equal + 1))
-            if perkId ~= "" and xp > 0 then result[perkId] = xp end
+        local eq = string.find(token, "=", 1, true)
+        if eq then
+            local key = string.sub(token, 1, eq - 1)
+            local value = tonumber(string.sub(token, eq + 1))
+            if key ~= "" and finiteNumber(value) and value > 0 then result[key] = value end
         end
     end
     return result
 end
 
-local function countSkillMap(skills)
-    local count, totalXp = 0, 0
-    for _, xp in pairs(skills or {}) do
-        local value = normalizeStoredSkillXp(xp)
-        if value > 0 then
-            count = count + 1
-            totalXp = totalXp + value
+
+function SS.getRecordDelta(player, device, currentSkills, savedSkills)
+    local result = { xp = 0, skills = 0, snapshot = {} }
+    if not player then return result end
+    local mode = SS.getLoadedMode(device)
+    if mode ~= SS.MODE_BLANK and mode ~= SS.MODE_SONG then return result end
+    if mode == SS.MODE_SONG and not SS.canUseKnowledgeRecord(player, device) then
+        return result
+    end
+    local saved = savedSkills or SS.getLoadedSkills(device)
+    local mergedSkills = result.snapshot
+    for perkId, savedXp in pairs(saved) do mergedSkills[perkId] = savedXp end
+    -- Personal Journal getWriteDelta's skill branch, including raw delta XP.
+    if SS.isSkillXpEnabled() then
+        for perkId, currentXp in pairs(currentSkills or SS.captureSkills(player)) do
+            local savedXp = tonumber(saved[perkId] or 0) or 0
+            local currentValue = tonumber(currentXp or 0) or 0
+            if normalizeStoredSkillXp(currentValue) > normalizeStoredSkillXp(savedXp) then
+                result.xp = result.xp + (currentValue - savedXp)
+                result.skills = result.skills + 1
+                mergedSkills[perkId] = currentValue
+            elseif mergedSkills[perkId] == nil then
+                mergedSkills[perkId] = currentValue
+            end
         end
     end
-    return count, totalXp
-end
-
-function SS.getRecordDelta(player, device)
-    local result = { xp = 0, skills = 0, snapshot = {} }
-    if not player or SS.getLoadedMode(device) ~= SS.MODE_BLANK then return result end
-    result.snapshot = SS.captureSkills(player)
-    result.skills, result.xp = countSkillMap(result.snapshot)
     return result
 end
 
@@ -608,11 +629,11 @@ local function resolvePerk(perkId)
     return nil
 end
 
-function SS.getRestoreDelta(player, device)
+function SS.getRestoreDelta(player, device, currentSkills, savedSkills)
     local result = { xp = 0, skills = 0 }
     if not player or SS.getLoadedMode(device) ~= SS.MODE_SONG then return result end
-    local current = SS.captureSkills(player)
-    for perkId, savedXp in pairs(SS.getLoadedSkills(device)) do
+    local current = currentSkills or SS.captureSkills(player)
+    for perkId, savedXp in pairs(savedSkills or SS.getLoadedSkills(device)) do
         local currentXp = tonumber(current[perkId] or 0) or 0
         local target = SS.getRecoverableSkillXp(savedXp)
         if resolvePerk(perkId)
@@ -624,18 +645,47 @@ function SS.getRestoreDelta(player, device)
     return result
 end
 
-function SS.writeSongToLoadedDevice(player, device)
-    if not player or SS.getLoadedMode(device) ~= SS.MODE_BLANK then return false end
-    local delta = SS.getRecordDelta(player, device)
-    if delta.skills <= 0 then return false end
 
+local RECORD_IDENTITY_FIELDS = {
+    "SS_loadedMode", "SS_loadedVersion", "SS_loadedSkills",
+    "SS_loadedAuthorName", "SS_loadedAuthorUser", "SS_loadedRecordedAt",
+}
+
+function SS.makeRecordPlan(player, device, delta)
+    if not player or not device or not delta or delta.skills <= 0 then return nil end
+    local encoded = SS.encodeSkills(delta.snapshot)
+    if encoded == "" then return nil end
+    local baseline = {}
     local md = device:getModData()
+    for _, key in ipairs(RECORD_IDENTITY_FIELDS) do baseline[key] = md[key] end
+    return { actor = SS.getActionActorKey(player), device = device,
+        baseline = baseline, encoded = encoded }
+end
+
+function SS.isRecordPlanCurrent(player, device, plan)
+    if type(plan) ~= "table" or plan.device ~= device
+        or plan.actor ~= SS.getActionActorKey(player)
+        or type(plan.baseline) ~= "table"
+        or type(plan.encoded) ~= "string" or plan.encoded == "" then return false end
+    local md = device:getModData()
+    for _, key in ipairs(RECORD_IDENTITY_FIELDS) do
+        if md[key] ~= plan.baseline[key] then return false end
+    end
+    return true
+end
+
+local function writeSongToLoadedDevice(player, device, plan)
+    if not SS.isRecordPlanCurrent(player, device, plan) then return false end
+    local recordedAt = SS.getGameDateTimeStamp()
+    local md = device:getModData()
+    -- Same first-author preservation as Personal Journal commitWrite.
+    if not md.SS_loadedAuthorName or tostring(md.SS_loadedAuthorName) == "" then
+        md.SS_loadedAuthorName = characterName(player)
+        md.SS_loadedAuthorUser = username(player)
+    end
     md.SS_loadedMode = SS.MODE_SONG
     md.SS_loadedVersion = SS.VERSION
-    md.SS_loadedSkills = SS.encodeSkills(delta.snapshot)
-    md.SS_loadedAuthorName = characterName(player)
-    md.SS_loadedAuthorUser = username(player)
-    local recordedAt = SS.getGameDateTimeStamp()
+    md.SS_loadedSkills = plan.encoded
     if recordedAt then md.SS_loadedRecordedAt = recordedAt end
     return true
 end
@@ -646,7 +696,11 @@ local function canRecordContext(player, device)
     if not SS.isKnowledgeDeviceActiveForPlayer(player, device) then return false end
     local data = SS.getDeviceData(device)
     if not data or not data:hasMedia() or tonumber(data:getMediaType()) ~= 0 then return false end
-    if SS.getLoadedMode(device) ~= SS.MODE_BLANK then return false end
+    local mode = SS.getLoadedMode(device)
+    if mode ~= SS.MODE_BLANK and mode ~= SS.MODE_SONG then return false end
+    if mode == SS.MODE_SONG and not SS.canUseKnowledgeRecord(player, device) then
+        return false
+    end
     if not SS.isDeviceTurnedOn(device) or not SS.hasUsablePower(device) then return false end
     return SS.hasHeadphones(device) and SS.hasMicrophone(player)
 end
@@ -672,15 +726,41 @@ function SS.canRestore(player, device)
         and SS.getRestoreDelta(player, device).skills > 0
 end
 
+-- Preserve Play-to-restore for a recorded disc. Once there is no missing
+-- recoverable XP, the same native Play control may record newly gained XP.
+-- An idle custom disc remains intercepted and never plays the native carrier.
+
+function SS.getKnowledgeActionChoice(player, device)
+    local mode = SS.getLoadedMode(device)
+    if mode ~= SS.MODE_BLANK and mode ~= SS.MODE_SONG then return nil, false end
+    local canRestore = mode == SS.MODE_SONG and canRestoreContext(player, device)
+    local canRecord = canRecordContext(player, device)
+    if not canRestore and not canRecord then
+        return mode == SS.MODE_BLANK and "record" or "restore", false
+    end
+    -- One native skill snapshot serves both decisions in this call.
+    local current = SS.captureSkills(player)
+    local saved = SS.getLoadedSkills(device)
+    if canRestore and SS.getRestoreDelta(player, device, current, saved).skills > 0 then
+        return "restore", true
+    end
+    if canRecord and SS.getRecordDelta(player, device, current, saved).skills > 0 then
+        return "record", true
+    end
+    -- Keep custom carrier playback intercepted even when there is no work.
+    return mode == SS.MODE_BLANK and "record" or "restore", false
+end
+
 function SS.isKnowledgeActionContextValid(player, device, kind)
     if kind == "record" then return canRecordContext(player, device) end
     if kind == "restore" then return canRestoreContext(player, device) end
     return false
 end
 
-function SS.commitRecord(player, device)
-    if not SS.canRecord(player, device) then return false end
-    return SS.writeSongToLoadedDevice(player, device)
+function SS.commitRecord(player, device, plan)
+    if isClient() or not canRecordContext(player, device) then return false end
+    -- No recapture here: elapsed time paid for this exact server-side snapshot.
+    return writeSongToLoadedDevice(player, device, plan)
 end
 
 function SS.applyRestore(player, device)

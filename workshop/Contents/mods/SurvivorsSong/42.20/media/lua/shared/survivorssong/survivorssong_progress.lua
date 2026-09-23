@@ -189,11 +189,14 @@ function SS.startKnowledgeSession(player, device, kind)
     local existing = SS._knowledgeSessions[device]
     if existing then return existing.player == player and existing.kind == kind end
     if SS._knowledgeSessionByPlayer[player] then return false end
-    if not SS.isKnowledgeActionValid(player, device, kind) then return false end
+    if not SS.isKnowledgeActionContextValid(player, device, kind) then return false end
 
     local delta = kind == "restore"
         and SS.getRestoreDelta(player, device)
         or SS.getRecordDelta(player, device)
+    if delta.skills <= 0 then return false end
+    local recordPlan = kind == "record" and SS.makeRecordPlan(player, device, delta) or nil
+    if kind == "record" and not recordPlan then return false end
     local pages = SS.getActionPageCount(kind, delta)
     local actor = SS.getActionActorKey(player)
     local startPage = SS.getSavedKnowledgePage(device, kind, actor, pages)
@@ -206,6 +209,7 @@ function SS.startKnowledgeSession(player, device, kind)
         itemId = deviceId(device),
         kind = kind,
         actor = actor,
+        recordPlan = recordPlan,
         pages = pages,
         startPage = startPage,
         lastPage = startPage,
@@ -291,7 +295,7 @@ end
 local function completeSession(session)
     local ok, applied = pcall(function()
         if session.kind == "record" then
-            return SS.commitRecord(session.player, session.device)
+            return SS.commitRecord(session.player, session.device, session.recordPlan)
         end
         return SS.applyRestore(session.player, session.device)
     end)
@@ -358,6 +362,9 @@ local function authoritativeTick()
             else
                 local valid = SS.isKnowledgeActionContextValid(
                     player, device, session.kind)
+                    and SS.getActionActorKey(player) == session.actor
+                    and (session.kind ~= "record"
+                        or SS.isRecordPlanCurrent(player, device, session.recordPlan))
                 if valid then
                     session.elapsed = session.elapsed + multiplier
                     saveCheckpoint(session)

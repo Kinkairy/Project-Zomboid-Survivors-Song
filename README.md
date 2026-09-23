@@ -2,7 +2,9 @@
 
 Project Zomboid B42.20 independent functional mod.
 
-Current version: `rc0.4.3`. Extends the native UI compatibility guards to generic inventory-item inspection: non-`InventoryItem` Java components such as `FluidContainer` are rejected before CD item methods are called, preventing liquid-transfer tooltip debugger errors. Recorded CD names retain the native-style `CD: ` prefix and each player's language, including existing recordings.
+Current version: `rc0.4.4`. Incrementally updates recorded CDs without erasing them. Recording commits the snapshot captured at session start; XP gained during that session remains available for the next update. Author ownership and raw-XP delta arithmetic follow Personal Journal 1.3.2.
+
+The rc0.4.3 repair remains included: Extends the native UI compatibility guards to generic inventory-item inspection: non-`InventoryItem` Java components such as `FluidContainer` are rejected before CD item methods are called, preventing liquid-transfer tooltip debugger errors. Recorded CD names retain the native-style `CD: ` prefix and each player's language, including existing recordings.
 
 ## Rebuild baseline
 
@@ -21,7 +23,8 @@ It does not incrementally patch the failed R1 erased-disc runtime implementation
 5. Play starts a server-authoritative background skill-recording session instead of native RecordedMedia playback. The session does not occupy the character TimedAction queue and produces no music, subtitles, media reward, or Survivor's Song listening effect.
 6. Completion turns the disc into **`CD: <character>'s Song`** / **`CD: <角色>的歌`** while the ejected physical item remains vanilla `Base.Disc_Retail`.
 7. Insert the song into a powered/on CD player with headphones installed and press **Play** to start a background restore/listening session. A microphone is not required for restore.
-8. A recorded song can be erased back to blank.
+8. After recoverable missing XP is restored, Play updates the same CD when there is new skill XP and a microphone is carried. Higher historical skill values and the first author are preserved. No new XP means no recording or timestamp refresh.
+9. A recorded song can still be erased back to blank.
 
 No Record/Restore buttons are added to the device window. If blank/song requirements are not satisfied, the existing Play control is simply disabled; no character-overhead warning is emitted.
 
@@ -88,3 +91,24 @@ Authoritative knowledge sessions check the native online-player list before
 advancing. Disconnect retains whole-page checkpoints and releases the session
 without sending a packet to the absent player. Skill XP restoration retains
 the Personal Journal target-minus-current algorithm and native addXpNoMultiplier.
+
+## rc0.4.4 maintenance
+
+The UI makes one skill snapshot per decision and shares a 250 ms display-only
+sample between the button and joypad prompt. Clicking and authority do fresh
+validation. Normal-CD playback, mounted media routing and native insert/eject
+are not replaced.
+
+Accounts are checked first; absent usernames fall back to the original character
+name, like Personal Journal. Unnamed and unbound old discs are not auto-claimed,
+erased, or rewritten. Their data remains intact; restore the matching identity
+or review that disc before changing its metadata.
+
+The CD and Journal remain independent mods. Skill arithmetic and ownership
+policy are aligned; the CD background-session adapter intentionally freezes its
+server plan instead of aborting on passive XP changes. Runtime data schema stays
+at version 2 and whole-page checkpoint schema stays at version 1.
+
+See `docs/release-rc0.4.4.md` and `tests/test_rc044.lua`. The regression suite
+executes the production Lua against engine stubs; it is not a game-engine or
+real-network certification.
