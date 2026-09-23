@@ -3,7 +3,7 @@
   "mod_id": "SurvivorsSong",
   "workshop_id": "3803803266",
   "app_id": "108600",
-  "runtime_tree": "70d60030243b50f464bbbd95b48ed881e943d9bf",
+  "runtime_tree": "736666b0a839e105e87c63cb04137d230e2d9a01",
   "baseline_runtime_tree": "88cc94fe43f2596cc04393081188752b78c3029a",
   "schema_version": 2,
   "checkpoint_model_version": 1,
@@ -11,8 +11,8 @@
     "42.20/media/lua/client/survivorssong/survivorssong_client.lua": "15c8c79b4be0383114bccaa58cfded71a7e6b4ba",
     "42.20/media/lua/shared/survivorssong/survivorssong_progress.lua": "235c6708564957e71032f9a0c0ff3d8eef92aa28",
     "42.20/media/lua/shared/survivorssong/survivorssong_shared.lua": "9a9d43dec7ea46a05db632edb3df1af74d4dbe17",
-    "42.20/mod.info": "f2ce366d3d6ed0d09e654dc01afd2282cd8b0d89",
-    "mod.info": "f2ce366d3d6ed0d09e654dc01afd2282cd8b0d89"
+    "42.20/mod.info": "dfb1b90581ce64d87583043441c2676d8774b580",
+    "mod.info": "dfb1b90581ce64d87583043441c2676d8774b580"
   },
   "validation": {
     "regression_cases": 49,
