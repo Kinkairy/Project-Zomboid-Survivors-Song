@@ -1,9 +1,12 @@
 SurvivorsSong = SurvivorsSong or {}
 
 local SS = SurvivorsSong
+SS._sharedReady = false
+SS._knowledgeInstalled = false
 
-SS.VERSION = 2
-SS.BUILD = "rc0.4.4"
+SS.VERSION = 3
+SS.LEGACY_VERSION = 2
+SS.BUILD = "rc0.4.5"
 SS.MODULE = "SurvivorsSong"
 
 SS.RETAIL_CD_TYPE = "Base.Disc_Retail"
@@ -19,24 +22,9 @@ SS.MODE_SONG = "song"
 SS.MEDIA_ACTION_TIME = 30
 SS.ACTION_PROGRESS_MODEL_VERSION = 1
 
--- Skill-only workload constants mirror Personal Journal 1.3.
-SS.ACTION_PAGE_RATE_NUMERATOR = 7
-SS.ACTION_PAGE_RATE_DENOMINATOR = 1000
-SS.WRITE_BASE = 600
-SS.WRITE_PER_CHANGED_SKILL = 120
-SS.WRITE_PER_100_XP = 1
-SS.READ_BASE = 900
-SS.READ_PER_CHANGED_SKILL = 90
-SS.READ_PER_100_XP = 0.8
-
 local function finiteNumber(value)
     value = tonumber(value)
     return value ~= nil and value == value and value ~= math.huge and value ~= -math.huge
-end
-
-local function normalizeStoredSkillXp(value)
-    if not finiteNumber(value) then return 0 end
-    return math.floor(math.max(0, tonumber(value)) * 1000 + 0.5) / 1000
 end
 
 local function safeFullType(item)
@@ -81,7 +69,7 @@ end
 function SS.isBlankCD(item)
     return safeFullType(item) == SS.RETAIL_CD_TYPE
         and not SS.isRecordedRetailCD(item)
-        and not SS.isKnowledgeCD(item)
+        and not SS.hasKnowledgeMarker(item)
 end
 
 function SS.findItemById(player, itemId)
@@ -146,15 +134,6 @@ end
 
 function SS.isSkillXpEnabled()
     return SS.isOptionEnabled("SkillXP", true)
-end
-
-function SS.getRecoveryRatio()
-    return SS.getOptionNumber("RecoveryPercent", 100, 50, 100) / 100
-end
-
-function SS.getRecoverableSkillXp(savedXp)
-    return normalizeStoredSkillXp((tonumber(savedXp or 0) or 0)
-        * SS.getRecoveryRatio())
 end
 
 function SS.hasMicrophone(player)
@@ -273,6 +252,13 @@ local LOADED_FIELDS = {
     "SS_loadedMode",
     "SS_loadedVersion",
     "SS_loadedSkills",
+    "SS_loadedKnowledgeVersion",
+    "SS_loadedRecipes",
+    "SS_loadedSkillBooks",
+    "SS_loadedSkillBookStates",
+    "SS_loadedMediaRewards",
+    "SS_loadedMediaRewardMode",
+    "SS_loadedAuthorDescId",
     "SS_loadedAuthorName",
     "SS_loadedAuthorUser",
     "SS_loadedRecordedAt",
@@ -302,38 +288,6 @@ function SS.setBlankLoaded(device)
     md.SS_loadedMode = SS.MODE_BLANK
     md.SS_loadedVersion = SS.VERSION
     return true
-end
-
-local function characterName(player)
-    if not player then return "Unknown" end
-    local ok, desc = pcall(function() return player:getDescriptor() end)
-    if ok and desc then
-        local first = tostring(desc:getForename() or "")
-        local last = tostring(desc:getSurname() or "")
-        local name = (first .. " " .. last):gsub("^%s+", ""):gsub("%s+$", "")
-        if name ~= "" then return name end
-    end
-    local okDisplay, display = pcall(function() return player:getDisplayName() end)
-    if okDisplay and display and tostring(display) ~= "" then return tostring(display) end
-    return "Unknown"
-end
-
-local function username(player)
-    if not player then return "" end
-    local ok, value = pcall(function() return player:getUsername() end)
-    if ok and value then return tostring(value) end
-    return ""
-end
-
-function SS.getActionActorKey(player)
-    if not player then return "" end
-    local descId = ""
-    local okDesc, desc = pcall(function() return player:getDescriptor() end)
-    if okDesc and desc then
-        local okId, value = pcall(function() return desc:getID() end)
-        if okId and value ~= nil then descId = tostring(value) end
-    end
-    return table.concat({ username(player), descId, characterName(player) }, "\31")
 end
 
 local function holderModData(holder)
@@ -405,21 +359,6 @@ function SS.getRemainingActionTime(totalTime, startPage, totalPages)
         * ((totalPages - startPage) / totalPages)))
 end
 
-function SS.getGameDateTimeStamp()
-    -- Same timestamp format as Personal Journal 1.3.2.
-    local gameTime = getGameTime and getGameTime() or nil
-    if not gameTime then return nil end
-    local timeOfDay = tonumber(gameTime:getTimeOfDay()) or 0
-    local totalMinutes = math.floor((timeOfDay * 60) + 0.0001) % 1440
-    local hour = math.floor(totalMinutes / 60)
-    local minute = totalMinutes % 60
-    return string.format("%04d/%02d/%02d %02d:%02d",
-        tonumber(gameTime:getYear()) or 0,
-        (tonumber(gameTime:getMonth()) or 0) + 1,
-        (tonumber(gameTime:getDay()) or 0) + 1,
-        hour, minute)
-end
-
 function SS.getSongName(authorName)
     authorName = tostring(authorName or "")
     if authorName == "" then authorName = "Unknown" end
@@ -433,17 +372,11 @@ function SS.getSongName(authorName)
 end
 
 function SS.isKnowledgeCD(item)
-    if safeFullType(item) ~= SS.RETAIL_CD_TYPE or SS.isRecordedRetailCD(item) then
-        return false
-    end
-    local md = item:getModData()
-    return md and tonumber(md.SS_version) == SS.VERSION
-        and tostring(md.SS_skills or "") ~= ""
+    return SS.isSupportedKnowledgeRecord(item, false)
 end
 
 function SS.getSavedSkills(item)
-    if not SS.isKnowledgeCD(item) then return {} end
-    return SS.decodeSkills(item:getModData().SS_skills)
+    return SS.Knowledge.getSavedSkills(SS.knowledgeView(item, false))
 end
 
 function SS.getSongTooltip(item)
@@ -455,23 +388,8 @@ end
 
 
 function SS.canUseKnowledgeRecord(player, itemOrDevice)
-    if not player then return false end
-    local savedUser, savedName
-    if SS.isKnowledgeCD(itemOrDevice) then
-        local md = itemOrDevice:getModData()
-        savedUser, savedName = md.SS_authorUser, md.SS_authorName
-    elseif SS.isCDPlayer(itemOrDevice) and SS.getLoadedMode(itemOrDevice) == SS.MODE_SONG then
-        local md = itemOrDevice:getModData()
-        savedUser, savedName = md.SS_loadedAuthorUser, md.SS_loadedAuthorName
-    else
-        return false
-    end
-    -- Same account-first / name-fallback rule as Personal Journal isAuthor.
-    -- Old unnamed/unbound records are not claimed or erased automatically.
-    savedUser = tostring(savedUser or "")
-    local currentUser = username(player)
-    if savedUser ~= "" and currentUser ~= "" then return savedUser == currentUser end
-    return tostring(savedName or "") == characterName(player)
+    local loaded = SS.isCDPlayer(itemOrDevice)
+    return SS.Knowledge.isAuthor(player, SS.knowledgeView(itemOrDevice, loaded))
 end
 
 function SS.refreshSongPresentation(item)
@@ -492,7 +410,7 @@ end
 
 function SS.getLoadedSkills(device)
     if SS.getLoadedMode(device) ~= SS.MODE_SONG then return {} end
-    return SS.decodeSkills(device:getModData().SS_loadedSkills)
+    return SS.Knowledge.getSavedSkills(SS.knowledgeView(device, true))
 end
 
 function SS.getLoadedSongName(device)
@@ -503,6 +421,9 @@ end
 function SS.makeEjectedCD(device)
     local mode = SS.getLoadedMode(device)
     if not mode then return nil end
+    -- Unknown loaded schemas must stay intact for a compatible version;
+    -- this adapter cannot safely repackage fields it does not understand.
+    if not SS.isSupportedLoadedCarrier(device) then return nil end
 
     local item = instanceItem(SS.RETAIL_CD_TYPE)
     if not item then return nil end
@@ -515,345 +436,17 @@ function SS.makeEjectedCD(device)
     if mode == SS.MODE_SONG then
         local source = device:getModData()
         local md = item:getModData()
-        md.SS_version = SS.VERSION
-        md.SS_skills = tostring(source.SS_loadedSkills or "")
-        md.SS_authorName = tostring(source.SS_loadedAuthorName or "")
-        md.SS_authorUser = tostring(source.SS_loadedAuthorUser or "")
-        md.SS_recordedAt = tostring(source.SS_loadedRecordedAt or "")
+        SS.copyKnowledgePayload(source, md, true, false)
         SS.refreshSongPresentation(item)
     end
     return item
 end
 
-local function getPerkId(perk)
-    if not perk then return nil end
-    local ok, id = pcall(function() return perk:getId() end)
-    if not ok or id == nil then return nil end
-    id = tostring(id)
-    if id == "" then return nil end
-    return id
-end
-
-function SS.captureSkills(player)
-    local result = {}
-    if not player or not player:getXp() then return result end
-    local xpObject = player:getXp()
-    local maxIndex = PerkFactory.Perks.getMaxIndex()
-    for index = 0, maxIndex - 1 do
-        local perk = PerkFactory.Perks.fromIndex(index)
-        if perk and perk ~= PerkFactory.Perks.None then
-            local perkId = getPerkId(perk)
-            if perkId then
-                local okXp, xp = pcall(function() return xpObject:getXP(perk) end)
-                local effectiveXp = okXp and tonumber(xp) or 0
-                local level = tonumber(player:getPerkLevel(perk) or 0) or 0
-                if level > 0 then
-                    local okLevelXp, levelXp = pcall(function()
-                        return PerkFactory.getPerk(perk):getTotalXpForLevel(level)
-                    end)
-                    if okLevelXp and finiteNumber(levelXp) then
-                        effectiveXp = math.max(effectiveXp, tonumber(levelXp))
-                    end
-                end
-                if effectiveXp > 0 then result[perkId] = effectiveXp end
-            end
-        end
-    end
-    return result
-end
-
-
--- Personal Journal 1.3.2 skill codec, kept independent of its optional content.
--- Preserve raw XP in storage; normalize only growth/restore comparisons.
-function SS.encodeSkills(skills)
-    local keys = {}
-    for perkId, xp in pairs(skills or {}) do
-        if perkId and finiteNumber(xp) and tonumber(xp) > 0 then
-            table.insert(keys, tostring(perkId))
-        end
-    end
-    table.sort(keys)
-    local parts = {}
-    for _, perkId in ipairs(keys) do
-        table.insert(parts, perkId .. "=" .. tostring(skills[perkId]))
-    end
-    return table.concat(parts, ";")
-end
-
-function SS.decodeSkills(encoded)
-    local result = {}
-    if not encoded or encoded == "" then return result end
-    for token in string.gmatch(tostring(encoded), "[^;]+") do
-        local eq = string.find(token, "=", 1, true)
-        if eq then
-            local key = string.sub(token, 1, eq - 1)
-            local value = tonumber(string.sub(token, eq + 1))
-            if key ~= "" and finiteNumber(value) and value > 0 then result[key] = value end
-        end
-    end
-    return result
-end
-
-
-function SS.getRecordDelta(player, device, currentSkills, savedSkills)
-    local result = { xp = 0, skills = 0, snapshot = {} }
-    if not player then return result end
-    local mode = SS.getLoadedMode(device)
-    if mode ~= SS.MODE_BLANK and mode ~= SS.MODE_SONG then return result end
-    if mode == SS.MODE_SONG and not SS.canUseKnowledgeRecord(player, device) then
-        return result
-    end
-    local saved = savedSkills or SS.getLoadedSkills(device)
-    local mergedSkills = result.snapshot
-    for perkId, savedXp in pairs(saved) do mergedSkills[perkId] = savedXp end
-    -- Personal Journal getWriteDelta's skill branch, including raw delta XP.
-    if SS.isSkillXpEnabled() then
-        for perkId, currentXp in pairs(currentSkills or SS.captureSkills(player)) do
-            local savedXp = tonumber(saved[perkId] or 0) or 0
-            local currentValue = tonumber(currentXp or 0) or 0
-            if normalizeStoredSkillXp(currentValue) > normalizeStoredSkillXp(savedXp) then
-                result.xp = result.xp + (currentValue - savedXp)
-                result.skills = result.skills + 1
-                mergedSkills[perkId] = currentValue
-            elseif mergedSkills[perkId] == nil then
-                mergedSkills[perkId] = currentValue
-            end
-        end
-    end
-    return result
-end
-
-local function resolvePerk(perkId)
-    local perk = PerkFactory.Perks.FromString(tostring(perkId or ""))
-    if perk and perk ~= PerkFactory.Perks.None then return perk end
-    return nil
-end
-
-function SS.getRestoreDelta(player, device, currentSkills, savedSkills)
-    local result = { xp = 0, skills = 0 }
-    if not player or SS.getLoadedMode(device) ~= SS.MODE_SONG then return result end
-    local current = currentSkills or SS.captureSkills(player)
-    for perkId, savedXp in pairs(savedSkills or SS.getLoadedSkills(device)) do
-        local currentXp = tonumber(current[perkId] or 0) or 0
-        local target = SS.getRecoverableSkillXp(savedXp)
-        if resolvePerk(perkId)
-            and normalizeStoredSkillXp(target) > normalizeStoredSkillXp(currentXp) then
-            result.xp = result.xp + (target - currentXp)
-            result.skills = result.skills + 1
-        end
-    end
-    return result
-end
-
-
-local RECORD_IDENTITY_FIELDS = {
-    "SS_loadedMode", "SS_loadedVersion", "SS_loadedSkills",
-    "SS_loadedAuthorName", "SS_loadedAuthorUser", "SS_loadedRecordedAt",
-}
-
-function SS.makeRecordPlan(player, device, delta)
-    if not player or not device or not delta or delta.skills <= 0 then return nil end
-    local encoded = SS.encodeSkills(delta.snapshot)
-    if encoded == "" then return nil end
-    local baseline = {}
-    local md = device:getModData()
-    for _, key in ipairs(RECORD_IDENTITY_FIELDS) do baseline[key] = md[key] end
-    return { actor = SS.getActionActorKey(player), device = device,
-        baseline = baseline, encoded = encoded }
-end
-
-function SS.isRecordPlanCurrent(player, device, plan)
-    if type(plan) ~= "table" or plan.device ~= device
-        or plan.actor ~= SS.getActionActorKey(player)
-        or type(plan.baseline) ~= "table"
-        or type(plan.encoded) ~= "string" or plan.encoded == "" then return false end
-    local md = device:getModData()
-    for _, key in ipairs(RECORD_IDENTITY_FIELDS) do
-        if md[key] ~= plan.baseline[key] then return false end
-    end
-    return true
-end
-
-local function writeSongToLoadedDevice(player, device, plan)
-    if not SS.isRecordPlanCurrent(player, device, plan) then return false end
-    local recordedAt = SS.getGameDateTimeStamp()
-    local md = device:getModData()
-    -- Same first-author preservation as Personal Journal commitWrite.
-    if not md.SS_loadedAuthorName or tostring(md.SS_loadedAuthorName) == "" then
-        md.SS_loadedAuthorName = characterName(player)
-        md.SS_loadedAuthorUser = username(player)
-    end
-    md.SS_loadedMode = SS.MODE_SONG
-    md.SS_loadedVersion = SS.VERSION
-    md.SS_loadedSkills = plan.encoded
-    if recordedAt then md.SS_loadedRecordedAt = recordedAt end
-    return true
-end
-
-local function canRecordContext(player, device)
-    if not SS.isSkillXpEnabled() then return false end
-    if not player or player:isDead() or not SS.isCDPlayer(device) then return false end
-    if not SS.isKnowledgeDeviceActiveForPlayer(player, device) then return false end
-    local data = SS.getDeviceData(device)
-    if not data or not data:hasMedia() or tonumber(data:getMediaType()) ~= 0 then return false end
-    local mode = SS.getLoadedMode(device)
-    if mode ~= SS.MODE_BLANK and mode ~= SS.MODE_SONG then return false end
-    if mode == SS.MODE_SONG and not SS.canUseKnowledgeRecord(player, device) then
-        return false
-    end
-    if not SS.isDeviceTurnedOn(device) or not SS.hasUsablePower(device) then return false end
-    return SS.hasHeadphones(device) and SS.hasMicrophone(player)
-end
-
-local function canRestoreContext(player, device)
-    if not SS.isSkillXpEnabled() then return false end
-    if not player or player:isDead() or not SS.isCDPlayer(device) then return false end
-    if not SS.isKnowledgeDeviceActiveForPlayer(player, device) then return false end
-    local data = SS.getDeviceData(device)
-    if not data or not data:hasMedia() or tonumber(data:getMediaType()) ~= 0 then return false end
-    if SS.getLoadedMode(device) ~= SS.MODE_SONG then return false end
-    if not SS.isDeviceTurnedOn(device) or not SS.hasUsablePower(device) then return false end
-    return SS.hasHeadphones(device) and SS.canUseKnowledgeRecord(player, device)
-end
-
-function SS.canRecord(player, device)
-    return canRecordContext(player, device)
-        and SS.getRecordDelta(player, device).skills > 0
-end
-
-function SS.canRestore(player, device)
-    return canRestoreContext(player, device)
-        and SS.getRestoreDelta(player, device).skills > 0
-end
-
--- Preserve Play-to-restore for a recorded disc. Once there is no missing
--- recoverable XP, the same native Play control may record newly gained XP.
--- An idle custom disc remains intercepted and never plays the native carrier.
-
-function SS.getKnowledgeActionChoice(player, device)
-    local mode = SS.getLoadedMode(device)
-    if mode ~= SS.MODE_BLANK and mode ~= SS.MODE_SONG then return nil, false end
-    local canRestore = mode == SS.MODE_SONG and canRestoreContext(player, device)
-    local canRecord = canRecordContext(player, device)
-    if not canRestore and not canRecord then
-        return mode == SS.MODE_BLANK and "record" or "restore", false
-    end
-    -- One native skill snapshot serves both decisions in this call.
-    local current = SS.captureSkills(player)
-    local saved = SS.getLoadedSkills(device)
-    if canRestore and SS.getRestoreDelta(player, device, current, saved).skills > 0 then
-        return "restore", true
-    end
-    if canRecord and SS.getRecordDelta(player, device, current, saved).skills > 0 then
-        return "record", true
-    end
-    -- Keep custom carrier playback intercepted even when there is no work.
-    return mode == SS.MODE_BLANK and "record" or "restore", false
-end
-
-function SS.isKnowledgeActionContextValid(player, device, kind)
-    if kind == "record" then return canRecordContext(player, device) end
-    if kind == "restore" then return canRestoreContext(player, device) end
-    return false
-end
-
-function SS.commitRecord(player, device, plan)
-    if isClient() or not canRecordContext(player, device) then return false end
-    -- No recapture here: elapsed time paid for this exact server-side snapshot.
-    return writeSongToLoadedDevice(player, device, plan)
-end
-
-function SS.applyRestore(player, device)
-    if not SS.canRestore(player, device) then return false end
-    local xpObject = player:getXp()
-    local changed = false
-    for perkId, savedXp in pairs(SS.getLoadedSkills(device)) do
-        local perk = resolvePerk(perkId)
-        if perk then
-            local current = tonumber(xpObject:getXP(perk)) or 0
-            local target = SS.getRecoverableSkillXp(savedXp)
-            if target > current then
-                addXpNoMultiplier(player, perk, target - current)
-                changed = true
-            end
-        end
-    end
-    return changed
-end
-
-function SS.getActionPageCount(kind, delta)
-    delta = delta or {}
-    local xpBlocks = math.ceil(math.max(0, tonumber(delta.xp or 0) or 0) / 100)
-    local units
-    if kind == "restore" then
-        units = SS.READ_BASE
-            + ((tonumber(delta.skills or 0) or 0) * SS.READ_PER_CHANGED_SKILL)
-            + (xpBlocks * SS.READ_PER_100_XP)
-    else
-        units = SS.WRITE_BASE
-            + ((tonumber(delta.skills or 0) or 0) * SS.WRITE_PER_CHANGED_SKILL)
-            + (xpBlocks * SS.WRITE_PER_100_XP)
-    end
-    return math.max(1, math.ceil(math.max(0, units)
-        * SS.ACTION_PAGE_RATE_NUMERATOR / SS.ACTION_PAGE_RATE_DENOMINATOR))
-end
-
-local function getVanillaReadingTime(pageCount)
-    local minutesPerPage = 2.0
-    local okOption, configured = pcall(function()
-        local option = getSandboxOptions():getOptionByName("MinutesPerPage")
-        if option then return option:getValue() end
-        return nil
-    end)
-    if okOption and tonumber(configured) and tonumber(configured) >= 0 then
-        minutesPerPage = tonumber(configured)
-    end
-
-    local minutesPerDay = 30
-    local okTime, configuredDay = pcall(function()
-        local gameTime = getGameTime()
-        return gameTime and gameTime:getMinutesPerDay() or nil
-    end)
-    if okTime and tonumber(configuredDay) and tonumber(configuredDay) > 0 then
-        minutesPerDay = tonumber(configuredDay)
-    end
-    return math.max(1, pageCount * minutesPerPage * minutesPerDay * 2)
-end
-
-function SS.getActionTime(kind, player, device, delta)
-    if player and player:isTimedActionInstant() then return 1 end
-    local multiplierName = kind == "restore" and "RestoreTimeMultiplier" or "RecordTimeMultiplier"
-    local multiplier = SS.getOptionNumber(multiplierName, 1.0, 0.1, 10.0)
-    delta = delta or (kind == "restore" and SS.getRestoreDelta(player, device)
-        or SS.getRecordDelta(player, device))
-    local pages = SS.getActionPageCount(kind, delta)
-
-    if kind == "restore" then
-        require "TimedActions/ISReadABook"
-        local view = {
-            getNumberOfPages = function() return pages end,
-            getSkillTrained = function() return nil end,
-            getFullType = function() return "Base.Diary1" end,
-            setAlreadyReadPages = function() end,
-            getAlreadyReadPages = function() return 0 end,
-            hasTag = function() return false end,
-        }
-        local minutes = getSandboxOptions():getOptionByName("MinutesPerPage"):getValue() or 2
-        if minutes < 0 then minutes = 2 end
-        local time = ISReadABook.getDuration({
-            character = player, item = view, minutesPerPage = minutes,
-        })
-        return math.max(1, math.floor(time * multiplier))
-    end
-
-    return math.max(1, math.floor(getVanillaReadingTime(pages) * multiplier))
-end
-
-function SS.isKnowledgeActionValid(player, device, kind)
-    if kind == "record" then return SS.canRecord(player, device) end
-    if kind == "restore" then return SS.canRestore(player, device) end
-    return false
-end
+-- Knowledge semantics are generated from Personal Journal 1.3.3. Device,
+-- carrier and presentation adapters live separately from that authority.
+SS._sharedReady = true
+require "survivorssong/knowledge"
+SS.installKnowledge()
 
 function SS.canLoadCustomCD(player, device, disc)
     if not player or player:isDead() or not SS.isCDPlayer(device) then return false end

@@ -2,9 +2,48 @@
 
 Project Zomboid B42.20 independent functional mod.
 
-Current version: `rc0.4.4`. Incrementally updates recorded CDs without erasing them. Recording commits the snapshot captured at session start; XP gained during that session remains available for the next update. Author ownership and raw-XP delta arithmetic follow Personal Journal 1.3.2.
+Published baseline: `rc0.4.4`, public source `0176cbec193223c5fd2cb033997d1aeaf1dd7f8d`.
+Release payload: `rc0.4.5`. Publication receipts are maintained outside source; live game/MP acceptance remains unverified.
 
-The rc0.4.3 repair remains included: Extends the native UI compatibility guards to generic inventory-item inspection: non-`InventoryItem` Java components such as `FluidContainer` are rejected before CD item methods are called, preventing liquid-transfer tooltip debugger errors. Recorded CD names retain the native-style `CD: ` prefix and each player's language, including existing recordings.
+## Complete Journal recovery
+
+The CD now uses Personal Journal 1.3.3's complete, mechanically generated
+knowledge core: skill XP, known recipes, skill-book pages and exact multiplier
+states, and qualifying permanent-reward CD/VHS knowledge. Each category has an
+independent sandbox switch. XP already at its target does not block other
+missing knowledge. Recovery is target-based and never stacks or lowers progress.
+
+The native Play control first restores missing knowledge, then updates the same
+CD when there is newly recordable knowledge. Recording freezes the complete
+server-admitted snapshot; knowledge gained later waits for the next recording.
+Restore pins the starting CD target, actor and policy. Normal XP/recipe/book/media
+growth during playback does not interrupt the session; the original Journal
+`applyRead` fills only the remaining current deficit at completion. New knowledge
+and higher XP/pages/multipliers are preserved.
+Author checks, full payload/version validation and sandbox-policy checks protect
+both operations. CD background sessions, subtitles, ordinary playback and MLO
+attachments retain their existing carrier and native UI paths.
+
+Data format 3 embeds the Journal schema-6 payload. Existing format-2 CDs remain
+XP-only until a real authorized recording update captures new knowledge. Loading
+or listening does not manufacture recipes, books or media history. Nil and exact
+empty multiplier snapshots remain distinct. Unsupported/future records are not
+classified as blank and are never silently rewritten.
+
+The generator pins Journal's source files and MIT license. The generated
+factories are isolated from the installed Journal mod and publish named factories
+for PZ's auto-loader; no Journal UI or journal timed action is installed. The
+same guarded native instant-book page fix is included once, even when both mods
+are installed. Server restore fields retain Journal's chunking, actor routing,
+book-state and native player-field synchronization. A committed result retries a
+failed native/chunk send without applying its rewards twice.
+
+Run `python3 -B tests/run_lua.py tests/knowledge_integration_test.lua` for the
+120-case CD integration suite. On Fedora, add `--library /lib64/liblua-5.4.so`.
+These production-module tests use explicit engine doubles and do not establish
+live B42.20/MP acceptance. The original `test_rc044.lua` is historical. The
+monorepo generator/parity checks and pinned Journal provenance are documented in
+[release detail](docs/JOURNAL-RECOVERY-CANDIDATE.md).
 
 ## Rebuild baseline
 
@@ -20,11 +59,10 @@ It does not incrementally patch the failed R1 erased-disc runtime implementation
 2. Right-click that CD player and choose **Erase CD**.
 3. The inserted disc becomes blank semantics. Its native device-media slot remains occupied so the original eject UI keeps working; when ejected the physical item is a erased vanilla `Base.Disc_Retail` with no RecordedMedia index.
 4. Insert/keep that blank CD, install headphones/earbuds in that exact CD player, carry vanilla `Base.Microphone`, turn the player on, and press the original **Play** button.
-5. Play starts a server-authoritative background skill-recording session instead of native RecordedMedia playback. The session does not occupy the character TimedAction queue and produces no music, subtitles, media reward, or Survivor's Song listening effect.
+5. Play starts a server-authoritative background knowledge-recording session instead of native RecordedMedia playback. The session does not occupy the character TimedAction queue and produces no music, subtitles, media reward, or Survivor's Song listening effect.
 6. Completion turns the disc into **`CD: <character>'s Song`** / **`CD: <角色>的歌`** while the ejected physical item remains vanilla `Base.Disc_Retail`.
 7. Insert the song into a powered/on CD player with headphones installed and press **Play** to start a background restore/listening session. A microphone is not required for restore.
-8. After recoverable missing XP is restored, Play updates the same CD when there is new skill XP and a microphone is carried. Higher historical skill values and the first author are preserved. No new XP means no recording or timestamp refresh.
-9. A recorded song can still be erased back to blank.
+8. A recorded song can be erased back to blank.
 
 No Record/Restore buttons are added to the device window. If blank/song requirements are not satisfied, the existing Play control is simply disabled; no character-overhead warning is emitted.
 
@@ -41,7 +79,7 @@ If the native CD program finishes before a configured deadline, it starts again 
 
 The enhanced listening layer remains limited to Boredom, Unhappiness, Stress, Panic and Anger. Its strength is fixed; there is no strength-percentage sandbox option. Boredom/Unhappiness/Stress are enabled by default and Panic/Anger are opt-in. Effects apply only while a normal CD is actually audible: the player is on, powered, playing, has headphones/earbuds installed, and volume is above zero. rc0.3 also shows the same green downward HaloText style used by vanilla TV/radio interactions when an enabled negative mood stat actually decreases.
 
-R2.2 also aligns the long skill-record/restore action presentation with Personal Journal 1.3.2: multiplayer inventory and overhead progress bars display the same sampled server progress, including explicit waiting/applying/completion-confirmation phases. XP snapshot precision and restore comparisons follow the Journal 1.3.2 skill-only path.
+R2.2 also aligns the long knowledge-record/restore action presentation with Personal Journal 1.3.2: multiplayer inventory and overhead progress bars display the same sampled server progress, including explicit waiting/applying/completion-confirmation phases. That historical baseline used Journal 1.3.2 skill-only rules; the current candidate uses the full Journal 1.3.3 core described above.
 
 R2.3 fixes dedicated-server blank-CD creation by using vanilla B42.20 `instanceItem()` for both the temporary carrier and ejected `Base.CD`; this removes the server-only `InventoryItemFactory` null error during erase/eject.
 
@@ -91,24 +129,3 @@ Authoritative knowledge sessions check the native online-player list before
 advancing. Disconnect retains whole-page checkpoints and releases the session
 without sending a packet to the absent player. Skill XP restoration retains
 the Personal Journal target-minus-current algorithm and native addXpNoMultiplier.
-
-## rc0.4.4 maintenance
-
-The UI makes one skill snapshot per decision and shares a 250 ms display-only
-sample between the button and joypad prompt. Clicking and authority do fresh
-validation. Normal-CD playback, mounted media routing and native insert/eject
-are not replaced.
-
-Accounts are checked first; absent usernames fall back to the original character
-name, like Personal Journal. Unnamed and unbound old discs are not auto-claimed,
-erased, or rewritten. Their data remains intact; restore the matching identity
-or review that disc before changing its metadata.
-
-The CD and Journal remain independent mods. Skill arithmetic and ownership
-policy are aligned; the CD background-session adapter intentionally freezes its
-server plan instead of aborting on passive XP changes. Runtime data schema stays
-at version 2 and whole-page checkpoint schema stays at version 1.
-
-See `docs/release-rc0.4.4.md` and `tests/test_rc044.lua`. The regression suite
-executes the production Lua against engine stubs; it is not a game-engine or
-real-network certification.

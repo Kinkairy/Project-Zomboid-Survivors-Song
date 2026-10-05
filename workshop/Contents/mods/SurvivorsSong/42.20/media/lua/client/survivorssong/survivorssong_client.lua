@@ -1,3 +1,4 @@
+require "survivorssong/journal_skillbook_compat"
 require "TimedActions/ISTimedActionQueue"
 require "ISUI/ISInventoryPane"
 require "ISUI/ISInventoryPaneContextMenu"
@@ -158,14 +159,14 @@ end
 local function customChoiceView(window)
     local t = getTimestampMs()
     local mode = SS.getLoadedMode(window.device)
-    local md = window.device and window.device:getModData() or {}
+    local signature = SS.getKnowledgePayloadSignature(window.device)
     local view = window.SurvivorsSongChoiceView
     if not view or view.player ~= window.player or view.device ~= window.device
-        or view.mode ~= mode or view.skills ~= md.SS_loadedSkills
+        or view.mode ~= mode or view.signature ~= signature
         or t < view.at or t - view.at >= 250 then
         local kind, allowed = SS.getKnowledgeActionChoice(window.player, window.device)
         view = { player = window.player, device = window.device, mode = mode,
-            skills = md.SS_loadedSkills, at = t, kind = kind, allowed = allowed }
+            signature = signature, at = t, kind = kind, allowed = allowed }
         window.SurvivorsSongChoiceView = view
     end
     return view.kind, view.allowed

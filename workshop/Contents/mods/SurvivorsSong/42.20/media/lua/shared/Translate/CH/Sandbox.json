@@ -17,11 +17,15 @@
     "Sandbox_SurvivorsSong_ReduceAnger": "降低憤怒",
     "Sandbox_SurvivorsSong_ReduceAnger_tooltip": "透過有電且有聲的耳機收聽普通 CD 時，每個遊戲分鐘降低憤怒。所有普通 CD（包括重複播放）均生效。此開關控制額外效果，原版媒體獎勵保留。預設關閉。",
     "Sandbox_SurvivorsSong_SkillXP": "記錄和恢復技能經驗",
-    "Sandbox_SurvivorsSong_SkillXP_tooltip": "控制擦除 CD 後的技能系統。錄入需要 CD 機內有空白 CD、已安裝耳機且角色攜帶麥克風；已錄製的歌在安裝耳機後透過「播放」恢復技能。",
-    "Sandbox_SurvivorsSong_RecordTimeMultiplier": "技能錄入時間倍率",
-    "Sandbox_SurvivorsSong_RecordTimeMultiplier_tooltip": "調整技能錄入時間。1.0 時，技能工作量和原版時間換算與個人日誌的書寫時間一致。",
-    "Sandbox_SurvivorsSong_RestoreTimeMultiplier": "技能恢復時間倍率",
-    "Sandbox_SurvivorsSong_RestoreTimeMultiplier_tooltip": "調整技能恢復時間。1.0 時，技能工作量使用與個人日誌恢復相同的原版閱讀時長路徑。",
-    "Sandbox_SurvivorsSong_RecoveryPercent": "技能恢復比例",
-    "Sandbox_SurvivorsSong_RecoveryPercent_tooltip": "設定錄製歌曲中已記錄經驗可恢復的比例。恢復只補足缺少的經驗，不會降低目前技能。"
+    "Sandbox_SurvivorsSong_SkillXP_tooltip": "僅控制技能經驗的錄入和恢復。配方、技能書和培訓媒體分別有獨立開關。錄入需要耳機和麥克風，恢復需要耳機。",
+    "Sandbox_SurvivorsSong_RecordTimeMultiplier": "知識錄入時間倍率",
+    "Sandbox_SurvivorsSong_RecordTimeMultiplier_tooltip": "調整知識錄入時間。1.0 時，經驗、配方、技能書狀態和培訓媒體採用與個人日誌書寫相同的頁數權重和時間換算。",
+    "Sandbox_SurvivorsSong_RestoreTimeMultiplier": "知識恢復時間倍率",
+    "Sandbox_SurvivorsSong_RestoreTimeMultiplier_tooltip": "調整知識恢復時間。1.0 時，所有已記錄知識採用個人日誌的工作量權重和原版閱讀時長計算。",
+    "Sandbox_SurvivorsSong_RecoveryPercent": "知識恢復比例",
+    "Sandbox_SurvivorsSong_RecoveryPercent_tooltip": "設定 CD 已記錄知識的可恢復比例。技能經驗按數值計算；配方、已讀技能書和有效培訓媒體按各自記錄數量向上取整選擇。重複收聽不會疊加恢復，也不會降低目前進度。",
+    "Sandbox_SurvivorsSong_KnownRecipes": "記錄已知配方",
+    "Sandbox_SurvivorsSong_SkillBooks": "記錄已讀技能書",
+    "Sandbox_SurvivorsSong_TrainingMedia": "記錄已看培訓媒體",
+    "Sandbox_SurvivorsSong_TrainingMedia_tooltip": "控制已看培訓媒體是否記錄並可恢復。只記錄帶永久技能、經驗或配方獎勵的 CD/VHS，純娛樂媒體不受影響。"
 }

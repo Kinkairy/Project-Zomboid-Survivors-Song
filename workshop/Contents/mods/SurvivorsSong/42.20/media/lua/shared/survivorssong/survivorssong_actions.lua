@@ -179,12 +179,8 @@ local function loadPhysicalDisc(character, device, disc)
     local progressData = SS.snapshotKnowledgeProgress(disc)
     local songData = nil
     if isSong then
-        songData = {
-            skills = tostring(source.SS_skills or ""),
-            authorName = tostring(source.SS_authorName or ""),
-            authorUser = tostring(source.SS_authorUser or ""),
-            recordedAt = tostring(source.SS_recordedAt or ""),
-        }
+        songData = {}
+        SS.copyKnowledgePayload(source, songData, false, true)
     end
 
     local inserted = insertCarrier(character, device, nil)
@@ -201,11 +197,7 @@ local function loadPhysicalDisc(character, device, disc)
         SS.clearLoadedMedia(device)
         local md = device:getModData()
         md.SS_loadedMode = SS.MODE_SONG
-        md.SS_loadedVersion = SS.VERSION
-        md.SS_loadedSkills = songData.skills
-        md.SS_loadedAuthorName = songData.authorName
-        md.SS_loadedAuthorUser = songData.authorUser
-        md.SS_loadedRecordedAt = songData.recordedAt
+        SS.copyKnowledgePayload(songData, md, true, true)
     else
         SS.setBlankLoaded(device)
     end

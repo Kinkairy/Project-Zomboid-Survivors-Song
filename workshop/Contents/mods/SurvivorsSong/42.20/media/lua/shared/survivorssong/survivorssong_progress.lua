@@ -7,12 +7,15 @@
 require "survivorssong/survivorssong_shared"
 
 local SS = SurvivorsSong
+require "survivorssong/knowledge_status"
 local STATE_PUSH_MS = 500
 
 SS._knowledgeSessions = SS._knowledgeSessions or {}
 SS._knowledgeSessionByPlayer = SS._knowledgeSessionByPlayer or setmetatable({}, { __mode = "k" })
 SS._clientKnowledgeSessions = SS._clientKnowledgeSessions or {}
 SS._clientKnowledgePending = SS._clientKnowledgePending or {}
+SS._clientKnowledgeSequence = SS._clientKnowledgeSequence or {}
+SS._knowledgeStateSequence = SS._knowledgeStateSequence or 0
 SS._clientKnowledgeSessionByPlayer = SS._clientKnowledgeSessionByPlayer
     or setmetatable({}, { __mode = "k" })
 
@@ -110,6 +113,11 @@ local function syncDevice(device)
     if device and isServer() then device:syncItemFields() end
 end
 
+local function nextStateSequence()
+    SS._knowledgeStateSequence = SS._knowledgeStateSequence + 1
+    return SS._knowledgeStateSequence
+end
+
 local function pushState(session, phase, force)
     if not session then return end
     local t = nowMs()
@@ -123,6 +131,8 @@ local function pushState(session, phase, force)
     if isServer() then
         sendServerCommand(session.player, SS.MODULE, "knowledgeState", {
             onlineID = session.player:getOnlineID(),
+            recipientKey = session.actor,
+            sequence = nextStateSequence(),
             itemId = session.itemId,
             kind = session.kind,
             phase = phase or session.phase,
@@ -157,8 +167,14 @@ end
 local function finishSession(session, phase, keepCheckpoint)
     if not session then return end
     if keepCheckpoint then saveCheckpoint(session) end
+    session.terminalPhase = phase
+    local ok, err = pcall(pushState, session, phase, true)
+    if not ok then
+        session.terminalRetryAt = nowMs() + STATE_PUSH_MS
+        print("[SurvivorsSong] terminal state pending: " .. tostring(err))
+        return
+    end
     removeSession(session)
-    pushState(session, phase, true)
     if not isServer() then
         clearItem(session.device)
         clearOverheadProgress(session.player)
@@ -194,7 +210,7 @@ function SS.startKnowledgeSession(player, device, kind)
     local delta = kind == "restore"
         and SS.getRestoreDelta(player, device)
         or SS.getRecordDelta(player, device)
-    if delta.skills <= 0 then return false end
+    if not SS.hasKnowledgeDelta(delta) then return false end
     local recordPlan = kind == "record" and SS.makeRecordPlan(player, device, delta) or nil
     if kind == "record" and not recordPlan then return false end
     local pages = SS.getActionPageCount(kind, delta)
@@ -210,6 +226,7 @@ function SS.startKnowledgeSession(player, device, kind)
         kind = kind,
         actor = actor,
         recordPlan = recordPlan,
+        restorePlan = kind == "restore" and SS.makeKnowledgeBaseline(player, device) or nil,
         pages = pages,
         startPage = startPage,
         lastPage = startPage,
@@ -231,6 +248,7 @@ function SS.stopKnowledgeSession(player, device, reason)
     if not authoritative() or not device then return false end
     local session = SS._knowledgeSessions[device]
     if not session or (player and session.player ~= player) then return false end
+    if session.applied then return false end
     saveCheckpoint(session)
     finishSession(session, reason or "stopped", false)
     return true
@@ -240,6 +258,7 @@ function SS.stopKnowledgeSessionForDevice(device, reason)
     if not authoritative() or not device then return false end
     local session = SS._knowledgeSessions[device]
     if not session then return false end
+    if session.applied then return false end
     saveCheckpoint(session)
     finishSession(session, reason or "stopped", false)
     return true
@@ -292,19 +311,49 @@ function SS.requestKnowledgeSessionStop(player, device)
     return SS.stopKnowledgeSession(player, device, "stopped")
 end
 
+local function publishAppliedSession(session)
+    if session.resultRetryAt and nowMs() < session.resultRetryAt then return end
+    local ok, err = pcall(function()
+        if isServer() and session.resultFields then
+            if session.resultFields.playerFieldMask and sendSyncPlayerFields then
+                sendSyncPlayerFields(session.player, session.resultFields.playerFieldMask)
+            end
+            -- The exact authoritative result is safe to resend: recipes,
+            -- known media lines and book maxima are idempotent Journal paths.
+            SS.KnowledgeSync.sendReadFields(session.player, session.resultFields, session.actor)
+        end
+        syncDevice(session.device)
+    end)
+    if not ok then
+        session.resultRetryAt = nowMs() + STATE_PUSH_MS
+        print("[SurvivorsSong] result sync pending: " .. tostring(err))
+        return
+    end
+    finishSession(session, "complete", false)
+end
+
 local function completeSession(session)
-    local ok, applied = pcall(function()
+    local ok, applied, fields = pcall(function()
         if session.kind == "record" then
             return SS.commitRecord(session.player, session.device, session.recordPlan)
         end
+        if not SS.isKnowledgeBaselineCurrent(session.player, session.device, session.restorePlan)
+            or not SS.isKnowledgePolicyCurrent(session.restorePlan) then
+            return false
+        end
+        -- The plan pins the CD target/author, device, actor and policy.
+        -- Background growth may change the remaining deficit. Journal applyRead
+        -- recomputes that deficit now and adds only the still-missing fields.
         return SS.applyRestore(session.player, session.device)
     end)
 
     if ok and applied then
         SS.clearKnowledgeProgress(session.device)
-        syncDevice(session.device)
         session.elapsed = session.duration
-        finishSession(session, "complete", false)
+        session.applied = true
+        session.phase = "applying"
+        session.resultFields = fields
+        publishAppliedSession(session)
         return
     end
 
@@ -313,7 +362,9 @@ local function completeSession(session)
     -- keeping a 100% session alive forever.
     if ok and session.kind == "restore"
         and SS.isKnowledgeActionContextValid(session.player, session.device, session.kind)
-        and SS.getRestoreDelta(session.player, session.device).skills <= 0 then
+        and SS.isKnowledgeBaselineCurrent(session.player, session.device, session.restorePlan)
+        and SS.isKnowledgePolicyCurrent(session.restorePlan)
+        and not SS.hasKnowledgeDelta(SS.getRestoreDelta(session.player, session.device)) then
         SS.clearKnowledgeProgress(session.device)
         syncDevice(session.device)
         session.elapsed = session.duration
@@ -355,6 +406,18 @@ local function authoritativeTick()
                 saveCheckpoint(session, false)
                 removeSession(session)
                 -- No terminal packet may be sent to a disconnected player.
+            elseif session.terminalPhase then
+                if not player or player:isDead() or SS.getActionActorKey(player) ~= session.actor then
+                    removeSession(session)
+                elseif not session.terminalRetryAt or nowMs() >= session.terminalRetryAt then
+                    finishSession(session, session.terminalPhase, false)
+                end
+            elseif session.applied then
+                if player and not player:isDead() and SS.getActionActorKey(player) == session.actor then
+                    publishAppliedSession(session)
+                else
+                    removeSession(session)
+                end
             elseif not player or player:isDead()
                 or SS.findDeviceById(player, session.itemId) ~= device then
                 saveCheckpoint(session)
@@ -365,6 +428,9 @@ local function authoritativeTick()
                     and SS.getActionActorKey(player) == session.actor
                     and (session.kind ~= "record"
                         or SS.isRecordPlanCurrent(player, device, session.recordPlan))
+                    and (session.kind ~= "restore"
+                        or SS.isKnowledgeBaselineCurrent(player, device, session.restorePlan))
+                    and SS.isKnowledgePolicyCurrent(session.recordPlan or session.restorePlan)
                 if valid then
                     session.elapsed = session.elapsed + multiplier
                     saveCheckpoint(session)
@@ -389,6 +455,8 @@ local function sendTerminalState(player, itemId, kind, phase, progress)
     if not isServer() or not player then return end
     sendServerCommand(player, SS.MODULE, "knowledgeState", {
         onlineID = player:getOnlineID(),
+        recipientKey = SS.getActionActorKey(player),
+        sequence = nextStateSequence(),
         itemId = tonumber(itemId),
         kind = tostring(kind or ""),
         phase = tostring(phase or "rejected"),
@@ -420,6 +488,10 @@ local function handleClientCommand(module, command, player, args)
 end
 
 local function handleServerCommand(module, command, args)
+    if isClient() and module == SS.MODULE and command == "readFields" then
+        SS.KnowledgeSync.applyReadFieldChunk(args)
+        return
+    end
     if not isClient() or module ~= SS.MODULE or command ~= "knowledgeState"
         or type(args) ~= "table" then
         return
@@ -429,14 +501,21 @@ local function handleServerCommand(module, command, args)
     local progress = tonumber(args.progress)
     local kind = tostring(args.kind or "")
     local phase = tostring(args.phase or "")
-    if not id or (kind ~= "record" and kind ~= "restore")
-        or not progress or progress < 0 or progress > 1 then
+    local sequence = tonumber(args.sequence)
+    if not id or id ~= id or id < 0 or id >= math.huge or id ~= math.floor(id)
+        or (kind ~= "record" and kind ~= "restore")
+        or not sequence or sequence ~= sequence or sequence < 1
+        or sequence >= math.huge or sequence ~= math.floor(sequence)
+        or not progress or progress ~= progress or progress < 0 or progress > 1 then
         return
     end
 
     local onlineID = tonumber(args.onlineID)
     local localPlayer = onlineID and getPlayerByOnlineID(onlineID) or nil
-    if not localPlayer or not localPlayer:isLocalPlayer() then return end
+    if not localPlayer or not localPlayer:isLocalPlayer() or localPlayer:isDead()
+        or args.recipientKey ~= SS.getActionActorKey(localPlayer) then return end
+    if sequence <= (SS._clientKnowledgeSequence[id] or 0) then return end
+    SS._clientKnowledgeSequence[id] = sequence
     SS._clientKnowledgePending[id] = nil
     local device = SS.findDeviceById(localPlayer, id)
     local active = phase == "running"
@@ -495,6 +574,7 @@ local function clearDisconnectedClient()
     end
     SS._clientKnowledgeSessions = {}
     SS._clientKnowledgePending = {}
+    SS._clientKnowledgeSequence = {}
     SS._clientKnowledgeSessionByPlayer = setmetatable({}, { __mode = "k" })
 end
 

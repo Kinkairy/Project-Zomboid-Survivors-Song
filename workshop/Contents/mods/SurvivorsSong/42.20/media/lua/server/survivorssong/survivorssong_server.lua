@@ -1,3 +1,4 @@
+require "survivorssong/journal_skillbook_compat"
 require "survivorssong/survivorssong_shared"
 require "survivorssong/survivorssong_actions"
 

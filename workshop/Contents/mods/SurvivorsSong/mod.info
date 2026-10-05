@@ -2,5 +2,5 @@ name=Survivor's Song
 id=SurvivorsSong
 icon=icon.png
 poster=icon.png
-modversion=rc0.4.4
-description=B42.20 | MP | 简体中文：延长普通 CD 的播放时间，并允许擦除后的原版 CD 记录角色技能经验，之后通过原版 CD 机恢复缺失的技能经验。 / 繁體中文：延長普通 CD 的播放時間，並允許擦除後的原版 CD 記錄角色技能經驗，之後透過原版 CD 機恢復缺失的技能經驗。 / English: Extends normal CD playback and lets erased vanilla CDs record character skill XP and later restore missing skill XP through a vanilla CD player.
+modversion=rc0.4.5
+description=B42.20 | MP | 简体中文：延长普通 CD 播放，并通过原版 CD 机录入和恢复技能经验、配方、技能书阅读进度与倍率，以及有效培训媒体记录。 / 繁體中文：延長普通 CD 播放，並透過原版 CD 機錄入和恢復技能經驗、配方、技能書閱讀進度與倍率，以及有效培訓媒體記錄。 / English: Extends normal CD playback and records and recovers skill XP, recipes, skill-book reading progress and multipliers, and qualifying training-media knowledge through a vanilla CD player.

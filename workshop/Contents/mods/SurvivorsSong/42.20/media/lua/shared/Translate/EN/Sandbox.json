@@ -17,11 +17,15 @@
     "Sandbox_SurvivorsSong_ReduceAnger": "Reduce anger",
     "Sandbox_SurvivorsSong_ReduceAnger_tooltip": "Reduces Anger once per game minute while an ordinary CD is audibly playing through powered headphones. Applies to every ordinary CD, including repeats. This switch controls the additional effect; vanilla media rewards remain. Disabled by default.",
     "Sandbox_SurvivorsSong_SkillXP": "Record and restore skill XP",
-    "Sandbox_SurvivorsSong_SkillXP_tooltip": "Controls the erased-CD skill system. Recording requires a blank CD in the player, installed headphones, and a carried microphone. A recorded song restores through Play with installed headphones.",
-    "Sandbox_SurvivorsSong_RecordTimeMultiplier": "Skill recording time multiplier",
-    "Sandbox_SurvivorsSong_RecordTimeMultiplier_tooltip": "Scales recording time. At 1.0, the skill-only workload and vanilla time scaling match Personal Journal writing.",
-    "Sandbox_SurvivorsSong_RestoreTimeMultiplier": "Skill recovery time multiplier",
-    "Sandbox_SurvivorsSong_RestoreTimeMultiplier_tooltip": "Scales recovery time. At 1.0, the skill-only workload uses the same vanilla reading-duration path as Personal Journal recovery.",
-    "Sandbox_SurvivorsSong_RecoveryPercent": "Skill recovery percentage",
-    "Sandbox_SurvivorsSong_RecoveryPercent_tooltip": "Percentage of the XP stored in a recorded song that can be restored. Recovery only fills missing XP and never lowers current skills."
+    "Sandbox_SurvivorsSong_SkillXP_tooltip": "Controls recording and recovery of skill XP only. Recipes, skill books and training media have independent switches. Recording requires headphones and a microphone; recovery requires headphones.",
+    "Sandbox_SurvivorsSong_RecordTimeMultiplier": "Knowledge recording time multiplier",
+    "Sandbox_SurvivorsSong_RecordTimeMultiplier_tooltip": "Scales recording time. At 1.0, XP, recipes, skill-book state and training-media workload use the same page weights and time scaling as Personal Journal writing.",
+    "Sandbox_SurvivorsSong_RestoreTimeMultiplier": "Knowledge recovery time multiplier",
+    "Sandbox_SurvivorsSong_RestoreTimeMultiplier_tooltip": "Scales recovery time. At 1.0, all recorded knowledge uses Personal Journal workload weights and the vanilla reading-duration calculation.",
+    "Sandbox_SurvivorsSong_RecoveryPercent": "Knowledge recovery percentage",
+    "Sandbox_SurvivorsSong_RecoveryPercent_tooltip": "Sets how much recorded CD knowledge is recoverable. Skill XP is scaled numerically; recipes, read skill books and qualifying training media are selected by recorded counts, rounded up. Repeated listening never stacks recovery or lowers current progress.",
+    "Sandbox_SurvivorsSong_KnownRecipes": "Record known recipes",
+    "Sandbox_SurvivorsSong_SkillBooks": "Record read skill books",
+    "Sandbox_SurvivorsSong_TrainingMedia": "Record watched training media",
+    "Sandbox_SurvivorsSong_TrainingMedia_tooltip": "Controls whether watched training media are recorded on the CD and can be restored. Only CDs and VHS tapes with permanent skill, experience, or recipe rewards are recorded; entertainment-only media are unaffected."
 }

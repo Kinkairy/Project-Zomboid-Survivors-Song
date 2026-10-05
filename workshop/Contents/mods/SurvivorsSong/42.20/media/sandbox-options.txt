@@ -33,6 +33,18 @@ option SurvivorsSong.SkillXP = {
     type = boolean, default = true, page = SurvivorsSong, translation = SurvivorsSong_SkillXP,
 }
 
+option SurvivorsSong.KnownRecipes = {
+    type = boolean, default = true, page = SurvivorsSong, translation = SurvivorsSong_KnownRecipes,
+}
+
+option SurvivorsSong.SkillBooks = {
+    type = boolean, default = true, page = SurvivorsSong, translation = SurvivorsSong_SkillBooks,
+}
+
+option SurvivorsSong.TrainingMedia = {
+    type = boolean, default = true, page = SurvivorsSong, translation = SurvivorsSong_TrainingMedia,
+}
+
 option SurvivorsSong.RecordTimeMultiplier = {
     type = double, min = 0.1, max = 10.0, default = 1.0, page = SurvivorsSong, translation = SurvivorsSong_RecordTimeMultiplier,
 }
